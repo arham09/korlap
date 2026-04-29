@@ -719,6 +719,7 @@ export interface RepoSettings {
   review_message: string;
   default_thinking: boolean;
   default_plan: boolean;
+  caveman_ultra: boolean;
   system_prompt: string;
   lsp_servers: Record<string, LspServerConfig>;
   mcp_servers: Record<string, McpServerConfig>;

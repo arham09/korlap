@@ -190,6 +190,7 @@ pub fn send_message(
         data_dir,
         session_id,
         source_pr,
+        caveman_ultra,
     ) = {
         let st = state.lock().map_err(|e| e.to_string())?;
         if st.agents.contains_key(&workspace_id) {
@@ -205,6 +206,7 @@ pub fn send_message(
         let settings = repo_settings.unwrap_or(&default_settings);
         let user_sp = settings.system_prompt.clone();
         let mcp_servers = settings.mcp_servers.clone();
+        let cv_ultra = settings.caveman_ultra;
         let prov = effective_provider(ws, settings);
         let ctx_dir = st.context_dir(&ws.repo_id);
         let sid = st.session_ids.get(&workspace_id).cloned();
@@ -222,6 +224,7 @@ pub fn send_message(
             st.data_dir.clone(),
             sid,
             ws.source_pr.clone(),
+            cv_ultra,
         )
     };
 
@@ -284,8 +287,13 @@ pub fn send_message(
     };
 
     let images_dir = data_dir.join("images");
+    let cli_prompt = if caveman_ultra {
+        format!("/caveman ultra\n\n{}", prompt)
+    } else {
+        prompt
+    };
     let ctx = SessionContext {
-        prompt,
+        prompt: cli_prompt,
         worktree_path: worktree_path.clone(),
         repo_path,
         session_id,

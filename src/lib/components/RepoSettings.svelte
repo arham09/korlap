@@ -37,6 +37,7 @@
     review_message: "",
     default_thinking: false,
     default_plan: false,
+    caveman_ultra: false,
     system_prompt: "",
     lsp_servers: {},
     mcp_servers: {},
@@ -851,6 +852,18 @@
               onclick={() => { settings.default_plan = !settings.default_plan; scheduleAutosave(); }}
               role="switch"
               aria-checked={settings.default_plan}
+            >
+              <span class="toggle-knob"></span>
+            </button>
+          </label>
+          <label class="toggle-row">
+            <span class="toggle-label">Caveman ultra</span>
+            <button
+              class="toggle-switch"
+              class:on={settings.caveman_ultra}
+              onclick={() => { settings.caveman_ultra = !settings.caveman_ultra; scheduleAutosave(); }}
+              role="switch"
+              aria-checked={settings.caveman_ultra}
             >
               <span class="toggle-knob"></span>
             </button>

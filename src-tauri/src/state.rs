@@ -99,6 +99,8 @@ pub struct RepoSettings {
     #[serde(default)]
     pub default_plan: bool,
     #[serde(default)]
+    pub caveman_ultra: bool,
+    #[serde(default)]
     pub system_prompt: String,
     /// User-configured LSP servers. Merged with built-in defaults at runtime.
     /// Key is a server id (e.g. "rust", "svelte"). See lsp::types::LspServerConfig.
