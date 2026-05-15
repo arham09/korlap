@@ -46,7 +46,9 @@ pub struct PrStatus {
     pub mergeable: String,  // "mergeable", "conflicting", "unknown"
     pub additions: i64,
     pub deletions: i64,
-    pub ahead_by: i64,      // commits ahead of remote (unpushed)
+    pub ahead_by: i64,      // commits ahead of remote (unpushed); 0 when no upstream
+    pub has_upstream: bool, // whether origin/<branch> exists locally
+    pub has_uncommitted: bool, // working tree has uncommitted changes (git status --porcelain non-empty)
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]

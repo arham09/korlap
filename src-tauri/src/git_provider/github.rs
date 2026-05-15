@@ -443,6 +443,53 @@ impl GitServiceProvider for GitHubProvider {
         branch: &str,
         token: &Option<String>,
     ) -> Result<PrStatus, String> {
+        // Branch-vs-origin check (local-only, no fetch). Used by both the no-PR
+        // and PR-found paths so the UI can distinguish "needs push" from "ready
+        // to open PR" even when no PR exists yet.
+        let has_upstream = Command::new("git")
+            .args([
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/remotes/origin/{}", branch),
+            ])
+            .current_dir(worktree_path)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        let ahead_by = if has_upstream {
+            Command::new("git")
+                .args([
+                    "rev-list",
+                    "--count",
+                    &format!("origin/{}..{}", branch, branch),
+                ])
+                .current_dir(worktree_path)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .trim()
+                        .parse::<i64>()
+                        .ok()
+                })
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        // Working-tree uncommitted-change signal — separate from branch-vs-main
+        // diff (which `get_changed_files` returns). The Create PR button relies on
+        // this to know whether *all* changes are already in commits.
+        let has_uncommitted = Command::new("git")
+            .args(["status", "--porcelain", "--untracked-files=normal"])
+            .current_dir(worktree_path)
+            .output()
+            .map(|o| o.status.success() && !o.stdout.iter().all(u8::is_ascii_whitespace))
+            .unwrap_or(false);
+
         let mut gh_cmd = self.cli_cmd_with_auth(worktree_path, token);
         gh_cmd.args([
             "pr",
@@ -465,7 +512,9 @@ impl GitServiceProvider for GitHubProvider {
                 mergeable: "unknown".into(),
                 additions: 0,
                 deletions: 0,
-                ahead_by: 0,
+                ahead_by,
+                has_upstream,
+                has_uncommitted,
             });
         }
 
@@ -524,25 +573,6 @@ impl GitServiceProvider for GitHubProvider {
                 "none".to_string()
             };
 
-        // Count unpushed commits: how far local branch is ahead of remote
-        let ahead_by = {
-            let rev_output = Command::new("git")
-                .args([
-                    "rev-list",
-                    "--count",
-                    &format!("origin/{}..{}", branch, branch),
-                ])
-                .current_dir(worktree_path)
-                .output();
-            match rev_output {
-                Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
-                    .trim()
-                    .parse::<i64>()
-                    .unwrap_or(0),
-                _ => 0,
-            }
-        };
-
         Ok(PrStatus {
             state: pr_state,
             url,
@@ -553,6 +583,8 @@ impl GitServiceProvider for GitHubProvider {
             additions,
             deletions,
             ahead_by,
+            has_upstream,
+            has_uncommitted,
         })
     }
 

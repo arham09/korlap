@@ -3,6 +3,7 @@
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { Play, X, Trash2, Pencil, Lightbulb, BookOpen, CircleCheck, Circle } from "lucide-svelte";
   import { tooltip } from "$lib/actions";
+  import { draggable, dragStore, type DragInfo } from "./dnd.svelte";
 
   interface Props {
     type: "todo" | "workspace";
@@ -24,11 +25,15 @@
     isCreating?: boolean;
     // Common
     focused?: boolean;
+    /** Column index this card lives in: 0=Todo, 1=Design, 2=InProgress, 3=Review, 4=Done. */
+    col: number;
     onClick?: (e: MouseEvent) => void;
     onAction?: () => void;
     onEdit?: () => void;
     onRemove?: () => void;
     onToggleReady?: () => void;
+    onDragStart?: () => void;
+    onDrop?: (toCol: number, toIndex: number, drag: DragInfo) => void;
   }
 
   let {
@@ -48,15 +53,26 @@
     isReviewing = false,
     isCreating = false,
     focused = false,
+    col,
     onClick,
     onAction,
     onEdit,
     onRemove,
     onToggleReady,
+    onDragStart,
+    onDrop,
   }: Props = $props();
 
   let elapsed = $state("");
   let interval: ReturnType<typeof setInterval> | undefined;
+
+  const cardId = $derived(type === "todo" ? (todoId ?? "") : (workspace?.id ?? ""));
+  const dragTitle = $derived(
+    type === "todo"
+      ? (title ?? "")
+      : (workspace?.task_title ?? workspace?.name ?? ""),
+  );
+  const isDragging = $derived(dragStore.current?.cardId === cardId && cardId !== "");
 
   $effect(() => {
     if (type === "workspace" && workspace?.status === "running") {
@@ -76,7 +92,13 @@
 </script>
 
 {#if type === "todo"}
-  <div class="card todo-card" class:ready class:focused>
+  <div
+    class="card todo-card"
+    class:ready
+    class:focused
+    class:dragging={isDragging}
+    use:draggable={{ cardId, type: "todo", fromCol: col, title: dragTitle, onStart: onDragStart, onDrop: (toCol, toIndex, drag) => onDrop?.(toCol, toIndex, drag) }}
+  >
     <span class="card-title">{title}</span>
     {#if description}
       <span class="card-desc">{description}</span>
@@ -126,7 +148,14 @@
 {:else if workspace}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="card ws-card" class:focused onclick={(e) => onClick?.(e)}>
+  <div
+    class="card ws-card"
+    class:focused
+    class:dragging={isDragging}
+    class:archived={workspace.archived}
+    onclick={(e) => onClick?.(e)}
+    use:draggable={{ cardId, type: "workspace", fromCol: col, title: dragTitle, onStart: onDragStart, onDrop: (toCol, toIndex, drag) => onDrop?.(toCol, toIndex, drag) }}
+  >
     <div class="card-top" class:has-title={!!workspace.task_title}>
       <span
         class="ws-dot"
@@ -159,6 +188,9 @@
     {#if isReviewing}
       <div class="card-review-badge">reviewing</div>
     {/if}
+    {#if workspace.archived}
+      <div class="card-archived-badge">archived</div>
+    {/if}
   </div>
 {/if}
 
@@ -168,6 +200,17 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 6px;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .card:active {
+    cursor: grabbing;
+  }
+
+  .card.dragging {
+    opacity: 0.4;
+    cursor: grabbing;
   }
 
   .card.focused {
@@ -494,6 +537,20 @@
     padding-left: calc(6px + 0.4rem);
     font-size: 0.62rem;
     color: var(--accent);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .card.archived {
+    opacity: 0.65;
+  }
+
+  .card-archived-badge {
+    margin-top: 0.35rem;
+    padding-left: calc(6px + 0.4rem);
+    font-size: 0.62rem;
+    color: var(--text-secondary);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;

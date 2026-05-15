@@ -17,9 +17,11 @@
     stagingError?: string | null;
     rebuildingStaging?: boolean;
     stagingMergedCount?: number;
+    /** When false, the Plan group is hidden unless it has at least one workspace. */
+    openspecEnabled?: boolean;
   }
 
-  let { workspaces, selectedWsId, creatingWsId = null, prStatusMap, reviewingWsIds = new Set(), onSelect, onRename, onRemove, stagingWsId = null, stagingError = null, rebuildingStaging = false, stagingMergedCount = 0 }: Props =
+  let { workspaces, selectedWsId, creatingWsId = null, prStatusMap, reviewingWsIds = new Set(), onSelect, onRename, onRemove, stagingWsId = null, stagingError = null, rebuildingStaging = false, stagingMergedCount = 0, openspecEnabled = false }: Props =
     $props();
 
   let menuOpenId = $state<string | null>(null);
@@ -43,14 +45,21 @@
     [...workspaces].filter((ws) => ws.id !== stagingWsId).sort((a, b) => a.created_at - b.created_at),
   );
 
-  type GroupKey = "active" | "review" | "done";
+  type GroupKey = "plan" | "active" | "review" | "done";
 
   let groups = $derived.by(() => {
+    const plan: WorkspaceInfo[] = [];
     const active: WorkspaceInfo[] = [];
     const review: WorkspaceInfo[] = [];
     const done: WorkspaceInfo[] = [];
 
+    // Spec phase wins over PR state — a Plan-stage workspace stays in Plan
+    // even with an open or merged PR, mirroring the kanban column rules.
     for (const ws of activeWorkspaces) {
+      if (ws.phase === "spec") {
+        plan.push(ws);
+        continue;
+      }
       const pr = prStatusMap.get(ws.id);
       if (pr?.state === "merged") {
         done.push(ws);
@@ -61,11 +70,16 @@
       }
     }
 
-    return [
-      { key: "active" as GroupKey, label: "In Progress", items: active },
-      { key: "review" as GroupKey, label: "Review", items: review },
-      { key: "done" as GroupKey, label: "Done", items: done },
-    ];
+    const all: { key: GroupKey; label: string; items: WorkspaceInfo[] }[] = [];
+    // Hide the Plan group entirely when OpenSpec is off AND no legacy spec
+    // workspaces remain, matching the kanban Plan column visibility.
+    if (openspecEnabled || plan.length > 0) {
+      all.push({ key: "plan" as GroupKey, label: "Plan", items: plan });
+    }
+    all.push({ key: "active" as GroupKey, label: "In Progress", items: active });
+    all.push({ key: "review" as GroupKey, label: "Review", items: review });
+    all.push({ key: "done" as GroupKey, label: "Done", items: done });
+    return all;
   });
 
   const collapsed = new SvelteSet<GroupKey>(["done"]);

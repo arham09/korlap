@@ -5,7 +5,7 @@
   import type { ReviewState } from "./ReviewPill.svelte";
   import type { ChatPanelApi, QueueDisplayItem, PastedImage } from "$lib/chat-utils";
   import type { Mention } from "$lib/components/chat/MentionInput.svelte";
-  import { ExternalLink, Check, GitPullRequestCreate, GitMerge, ArrowUp, ArrowDown, AlertTriangle, Wrench, Eye, Play, Square, CircleX, MessageSquare, Minus, ChevronUp, ChevronDown, Timer, RefreshCcw, Plus, X, Terminal } from "lucide-svelte";
+  import { ExternalLink, Check, GitPullRequestCreate, GitMerge, GitCommitVertical, ArrowUp, ArrowDown, ArrowRight, AlertTriangle, Wrench, Eye, Play, Square, CircleX, MessageSquare, Minus, ChevronUp, ChevronDown, Timer, RefreshCcw, Plus, X, Terminal } from "lucide-svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import ChatPanel from "$lib/components/chat/ChatPanel.svelte";
   import DiffViewer from "./DiffViewer.svelte";
@@ -38,7 +38,11 @@
     baseBehindBy: number;
     updatingBranch: boolean;
     onPrAction: () => void;
+    onCommitAction: () => void;
+    onPushAction: () => void;
+    onCreatePrAction: () => void;
     onUpdateBranch: () => void;
+    onAdvance: () => void;
     onReview: () => void;
     reviewRunning: boolean;
     operationInProgress: boolean;
@@ -90,7 +94,11 @@
     baseBehindBy,
     updatingBranch,
     onPrAction,
+    onCommitAction,
+    onPushAction,
+    onCreatePrAction,
     onUpdateBranch,
+    onAdvance,
     onReview,
     reviewRunning,
     operationInProgress,
@@ -536,6 +544,16 @@
             Update{#if !updatingBranch}&nbsp;<span class="update-count">{baseBehindBy}</span>{/if}
           </button>
         {/if}
+        {#if selectedWs?.phase === "spec"}
+          <button
+            class="action-badge advance"
+            onclick={onAdvance}
+            disabled={isBusy}
+            use:tooltip={{ text: "Advance to In Progress — flips this workspace from Plan to implementation" }}
+          >
+            <ArrowRight size={11} /> Move to In Progress
+          </button>
+        {/if}
         {#if prStatus?.state === "open"}
           <div class="action-group">
             <button class="pr-link-btn" onclick={() => openUrl(prStatus!.url)} use:tooltip={{ text: `Open PR #${prStatus.number} in browser` }}>
@@ -560,12 +578,46 @@
           </div>
         {:else if prStatus?.state === "merged"}
           <span class="status-label merged"><Check size={10} class="status-icon" /> Done</span>
-        {:else if wsChanges && (wsChanges.additions > 0 || wsChanges.deletions > 0)}
+        {:else if (wsChanges && (wsChanges.additions > 0 || wsChanges.deletions > 0)) || (prStatus?.ahead_by ?? 0) > 0 || prStatus?.has_upstream}
+          {@const hasLocal = !!prStatus?.has_uncommitted}
+          {@const aheadBy = prStatus?.ahead_by ?? 0}
+          {@const hasUpstream = !!prStatus?.has_upstream}
+          {@const canMakePr = !hasLocal && aheadBy === 0 && hasUpstream}
           <div class="action-group">
             <button class="action-badge review" onclick={onReview} disabled={isBusy} use:tooltip={{ text: "Review changes", shortcut: "⌘R" }}>
               <Eye size={11} /> Review
             </button>
-            <button class="action-badge create-pr" onclick={onPrAction} disabled={isBusy} use:tooltip={{ text: "Push and create pull request", shortcut: "⌘M" }}>{#if operationInProgress}<span class="btn-spinner"></span>{:else}<GitPullRequestCreate size={11} />{/if} Push & create PR</button>
+            {#if hasLocal}
+              <button
+                class="action-badge push-needed"
+                onclick={onCommitAction}
+                disabled={isBusy}
+                use:tooltip={{ text: "Commit changes (no push)", shortcut: "⌘K" }}
+              >
+                {#if operationInProgress}<span class="btn-spinner"></span>{:else}<GitCommitVertical size={11} />{/if}
+                Commit
+              </button>
+            {/if}
+            {#if aheadBy > 0 || !hasUpstream}
+              <button
+                class="action-badge push-needed"
+                onclick={onPushAction}
+                disabled={isBusy}
+                use:tooltip={{ text: "Push commits to remote", shortcut: "⌘P" }}
+              >
+                {#if operationInProgress}<span class="btn-spinner"></span>{:else}<ArrowUp size={11} />{/if}
+                Push
+              </button>
+            {/if}
+            <button
+              class="action-badge create-pr"
+              onclick={onCreatePrAction}
+              disabled={isBusy || !canMakePr}
+              use:tooltip={{ text: canMakePr ? "Create pull request" : "Push your changes first", shortcut: "⌘M" }}
+            >
+              {#if operationInProgress}<span class="btn-spinner"></span>{:else}<GitPullRequestCreate size={11} />{/if}
+              Create PR
+            </button>
           </div>
         {/if}
       </div>
@@ -1288,14 +1340,16 @@
   }
 
   .action-badge.create-pr,
-  .action-badge.push-needed {
+  .action-badge.push-needed,
+  .action-badge.advance {
     color: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 40%, transparent);
     background: color-mix(in srgb, var(--accent) 7%, transparent);
   }
 
   .action-badge.create-pr:hover:not(:disabled),
-  .action-badge.push-needed:hover:not(:disabled) {
+  .action-badge.push-needed:hover:not(:disabled),
+  .action-badge.advance:hover:not(:disabled) {
     filter: brightness(1.2);
   }
 

@@ -261,3 +261,234 @@ pub fn inject_shell_env(cmd: &mut std::process::Command) {
     }
 }
 
+// ── Title → branch helpers ───────────────────────────────────────────
+
+/// Convert a title into a kebab-case slug. Lowercases ASCII alphanumerics,
+/// collapses runs of non-alphanumerics into a single `-`, trims trailing `-`.
+/// Mirrors the TS `slugifyTitle` in +page.svelte.
+pub fn slugify_title(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut prev_hyphen = true;
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_hyphen = false;
+        } else if !prev_hyphen {
+            out.push('-');
+            prev_hyphen = true;
+        }
+    }
+    if out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+const BRANCH_PREFIXES: &[&str] = &["chore", "feat", "fix"];
+const PREFIX_SEPARATORS: &[char] = &[':', '-', '/'];
+const SLUG_MAX_LEN: usize = 60;
+
+/// Pick a conventional-commit prefix from the start of a card title.
+/// Returns (prefix, rest) where `prefix` ∈ {"feat","fix","chore"}; defaults to
+/// "feat" when no prefix word is found at the start. The prefix word must be
+/// followed by `:`, `-`, `/`, ASCII whitespace, or end-of-input — so titles
+/// like "fixing the bug" do NOT match `fix`.
+pub fn extract_prefix(title: &str) -> (&'static str, &str) {
+    let trimmed = title.trim_start();
+
+    for &candidate in BRANCH_PREFIXES {
+        let n = candidate.len();
+        let head = match trimmed.get(..n) {
+            Some(h) => h,
+            None => continue,
+        };
+        if !head.eq_ignore_ascii_case(candidate) {
+            continue;
+        }
+        let after = &trimmed[n..];
+        match after.chars().next() {
+            None => return (candidate, ""),
+            Some(c) if c.is_ascii_whitespace() || PREFIX_SEPARATORS.contains(&c) => {
+                let rest = after.trim_start_matches(|c: char| {
+                    c.is_ascii_whitespace() || PREFIX_SEPARATORS.contains(&c)
+                });
+                return (candidate, rest);
+            }
+            Some(_) => continue,
+        }
+    }
+
+    ("feat", trimmed)
+}
+
+/// Compose `extract_prefix` + `slugify_title` + length cap. Returns `None`
+/// when the title can't yield a meaningful slug (empty, all symbols, or just
+/// a bare prefix like "fix:") so callers can fall back to random naming.
+pub fn derive_branch_from_title(title: &str) -> Option<(&'static str, String)> {
+    let (prefix, rest) = extract_prefix(title);
+    let mut slug = slugify_title(rest);
+    if slug.is_empty() {
+        return None;
+    }
+    // Slug is ASCII after slugify_title, so byte-len == char-len; truncate is safe.
+    if slug.len() > SLUG_MAX_LEN {
+        slug.truncate(SLUG_MAX_LEN);
+        while slug.ends_with('-') {
+            slug.pop();
+        }
+        if slug.is_empty() {
+            return None;
+        }
+    }
+    Some((prefix, slug))
+}
+
+/// Compute the implementation-branch name from a proposal-branch name. Strips
+/// the segment before the first `/` (the conventional prefix `feat/`/`fix/`/
+/// `chore/`/`korlap/`) and replaces it with `impl/`. Branches without a `/`
+/// just get `impl/` prepended.
+pub fn impl_branch_from(original: &str) -> String {
+    let slug = original
+        .split_once('/')
+        .map(|(_, rest)| rest)
+        .unwrap_or(original);
+    format!("impl/{}", slug)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_prefix_explicit_colon() {
+        assert_eq!(extract_prefix("feat: add login button"), ("feat", "add login button"));
+    }
+
+    #[test]
+    fn extract_prefix_space_separator() {
+        assert_eq!(extract_prefix("Fix memory leak"), ("fix", "memory leak"));
+    }
+
+    #[test]
+    fn extract_prefix_dash_separator() {
+        assert_eq!(extract_prefix("Chore - update deps"), ("chore", "update deps"));
+    }
+
+    #[test]
+    fn extract_prefix_slash_separator() {
+        assert_eq!(extract_prefix("feat/foo-bar"), ("feat", "foo-bar"));
+    }
+
+    #[test]
+    fn extract_prefix_default_feat() {
+        assert_eq!(extract_prefix("Update README"), ("feat", "Update README"));
+    }
+
+    #[test]
+    fn extract_prefix_substring_no_match() {
+        assert_eq!(extract_prefix("fixing the bug"), ("feat", "fixing the bug"));
+        assert_eq!(extract_prefix("feature add button"), ("feat", "feature add button"));
+        assert_eq!(extract_prefix("chores list"), ("feat", "chores list"));
+    }
+
+    #[test]
+    fn extract_prefix_uppercase() {
+        assert_eq!(extract_prefix("FEAT: x"), ("feat", "x"));
+        assert_eq!(extract_prefix("CHORE/y"), ("chore", "y"));
+    }
+
+    #[test]
+    fn extract_prefix_leading_whitespace() {
+        assert_eq!(extract_prefix("  fix: x"), ("fix", "x"));
+    }
+
+    #[test]
+    fn extract_prefix_only_prefix() {
+        assert_eq!(extract_prefix("fix"), ("fix", ""));
+        assert_eq!(extract_prefix("feat"), ("feat", ""));
+        assert_eq!(extract_prefix("chore"), ("chore", ""));
+    }
+
+    #[test]
+    fn extract_prefix_utf8_safe() {
+        // No prefix match; multi-byte chars must not panic on byte-slice indexing.
+        let (p, r) = extract_prefix("修复 bug");
+        assert_eq!(p, "feat");
+        assert_eq!(r, "修复 bug");
+    }
+
+    #[test]
+    fn slugify_title_basic() {
+        assert_eq!(slugify_title("Hello World!"), "hello-world");
+        assert_eq!(slugify_title("foo  bar"), "foo-bar");
+        assert_eq!(slugify_title("---"), "");
+        assert_eq!(slugify_title(""), "");
+    }
+
+    #[test]
+    fn derive_branch_from_title_basic() {
+        assert_eq!(
+            derive_branch_from_title("feat: add login button"),
+            Some(("feat", "add-login-button".to_string()))
+        );
+    }
+
+    #[test]
+    fn derive_branch_from_title_default_prefix() {
+        assert_eq!(
+            derive_branch_from_title("Update README"),
+            Some(("feat", "update-readme".to_string()))
+        );
+    }
+
+    #[test]
+    fn derive_branch_from_title_fix_dash() {
+        assert_eq!(
+            derive_branch_from_title("Chore - update deps"),
+            Some(("chore", "update-deps".to_string()))
+        );
+    }
+
+    #[test]
+    fn derive_branch_from_title_empty_slug() {
+        assert_eq!(derive_branch_from_title("!!!"), None);
+        assert_eq!(derive_branch_from_title(""), None);
+        assert_eq!(derive_branch_from_title("fix:"), None);
+    }
+
+    #[test]
+    fn derive_branch_from_title_truncates() {
+        let title = "a".repeat(200);
+        let (prefix, slug) = derive_branch_from_title(&title).unwrap();
+        assert_eq!(prefix, "feat");
+        assert!(slug.len() <= SLUG_MAX_LEN);
+        assert!(!slug.ends_with('-'));
+    }
+
+    #[test]
+    fn impl_branch_from_strips_feat_prefix() {
+        assert_eq!(impl_branch_from("feat/add-login-button"), "impl/add-login-button");
+    }
+
+    #[test]
+    fn impl_branch_from_strips_korlap_prefix() {
+        assert_eq!(impl_branch_from("korlap/clever-fox"), "impl/clever-fox");
+    }
+
+    #[test]
+    fn impl_branch_from_no_slash() {
+        assert_eq!(impl_branch_from("myfeature"), "impl/myfeature");
+    }
+
+    #[test]
+    fn impl_branch_from_keeps_extra_slashes() {
+        // Multi-slash branches: only the leading segment is replaced.
+        assert_eq!(impl_branch_from("feat/sub/foo"), "impl/sub/foo");
+    }
+
+    #[test]
+    fn impl_branch_from_already_impl() {
+        // No-op for already-impl branches; collision retry handles the case.
+        assert_eq!(impl_branch_from("impl/foo"), "impl/foo");
+    }
+}

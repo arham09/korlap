@@ -12,6 +12,8 @@
   import AutopilotPill, { type AutopilotEvent } from "./AutopilotPill.svelte";
   import { Plus, Ellipsis, Trash2, GitBranch, GitPullRequest, GitMerge, Download } from "lucide-svelte";
   import { tooltip } from "$lib/actions";
+  import { addToast } from "$lib/stores/toasts.svelte";
+  import type { DragInfo } from "./dnd.svelte";
 
   interface TodoItem {
     id: string;
@@ -30,6 +32,7 @@
 
   interface Props {
     todos: TodoItem[];
+    design: WorkspaceInfo[];
     inProgress: WorkspaceInfo[];
     review: WorkspaceInfo[];
     done: WorkspaceInfo[];
@@ -40,8 +43,12 @@
     repoId?: string;
     repoName?: string;
     defaultThinkingMode?: boolean;
+    defaultPlanMode?: boolean;
     onCardClick: (wsId: string) => void;
     onSpawnAgent: (todoId: string) => void;
+    onSpawnDesign: (todoId: string) => void;
+    onStartDefault: (todoId: string) => void;
+    onAdvanceFromDesign: (wsId: string) => void;
     onNewTodo: (data: TaskData) => void;
     onAddAndStart: (data: TaskData) => void;
     onEditTodo: (todoId: string, data: TaskData) => void;
@@ -52,6 +59,9 @@
     onManualCheckout: (data: ManualCheckoutData) => void;
     onPrCheckout: (prNumber: number) => void;
     onComboCheckout: (prNumbers: number[]) => void;
+    onReorderTodos?: (orderedIds: string[]) => void;
+    onPush?: (wsId: string) => void;
+    onMergePr?: (wsId: string) => void;
     autopilotEnabled?: boolean;
     autopilotEvents?: AutopilotEvent[];
     autopilotActiveAgents?: number;
@@ -61,10 +71,13 @@
     autopilotRebuildingStaging?: boolean;
     onAutopilotCommand?: (command: string) => void;
     active?: boolean;
+    /** When false, the Plan column is hidden unless legacy spec-phase workspaces still exist. */
+    openspecEnabled?: boolean;
   }
 
   let {
     todos,
+    design,
     inProgress,
     review,
     done,
@@ -75,8 +88,12 @@
     repoId,
     repoName,
     defaultThinkingMode = false,
+    defaultPlanMode = false,
     onCardClick,
     onSpawnAgent,
+    onSpawnDesign,
+    onStartDefault,
+    onAdvanceFromDesign,
     onNewTodo,
     onAddAndStart,
     onEditTodo,
@@ -87,6 +104,9 @@
     onManualCheckout,
     onPrCheckout,
     onComboCheckout,
+    onReorderTodos,
+    onPush,
+    onMergePr,
     autopilotEnabled = false,
     autopilotEvents = [],
     autopilotActiveAgents = 0,
@@ -96,7 +116,13 @@
     autopilotRebuildingStaging = false,
     onAutopilotCommand,
     active = false,
+    openspecEnabled = false,
   }: Props = $props();
+
+  // Plan column visible when OpenSpec is on, OR when there are legacy spec
+  // workspaces left over from a previous OpenSpec-on state. Drag rules and
+  // column rendering both respect this.
+  const planColumnVisible = $derived(openspecEnabled || design.length > 0);
 
   let showAddDialog = $state(false);
   let showManualCheckout = $state(false);
@@ -121,8 +147,123 @@
   let focusedRow = $state(0);
   let boardEl = $state<HTMLDivElement | null>(null);
 
-  // Column data as indexable array: [todo, inProgress, review, done]
-  const columnItems = $derived([todos, inProgress, review, done] as const);
+  // Column data as indexable array: [todo, design, inProgress, review, done]
+  const columnItems = $derived([todos, design, inProgress, review, done] as const);
+
+  // ── Drag-and-drop rules ────────────────────────────────
+  // Allowed forward transitions:
+  //   Todo (0) → Todo (0)         reorder
+  //   Todo (0) → Design (1)       spawn agent in plan mode
+  //   Todo (0) → InProgress (2)   spawn agent (skip design)
+  //   Design (1) → InProgress (2) flip to bypassPermissions and start implementing
+  //   InProgress (2) → Review (3) push + create PR (modal)
+  //   Review (3) → Done (4)       merge PR (modal)
+  // Everything else is rejected with a toast.
+  const COL_NAMES = ["Todo", "Plan", "In Progress", "Review", "Done"] as const;
+
+  function dragAccepts(drag: DragInfo, toCol: number): boolean {
+    if (drag.type === "todo") {
+      // Todo can only enter Plan (col 1) when the Plan column is actually visible.
+      if (toCol === 1) return planColumnVisible;
+      return toCol === 0 || toCol === 2;
+    }
+    // workspace
+    if (drag.fromCol === 1 && toCol === 2) return true;
+    if (drag.fromCol === 2 && toCol === 3) return true;
+    if (drag.fromCol === 3 && toCol === 4) return true;
+    return false;
+  }
+
+  function rejectionReason(drag: DragInfo, toCol: number): string {
+    if (drag.fromCol === toCol) {
+      // same-col reorder: only Todo allowed
+      if (toCol === 0) return ""; // shouldn't get here, accepts() returns true
+      return `${COL_NAMES[toCol]} is sorted automatically — manual reorder isn't supported.`;
+    }
+    if (drag.type === "todo" && toCol > 2) {
+      return `A todo has no workspace yet — start it first.`;
+    }
+    if (drag.type === "workspace" && (toCol === 0 || toCol === 1)) {
+      if (toCol === 1) return `Workspaces can't go back to Plan — finalize the spec before starting.`;
+      return `Use Remove to delete a workspace; it can't go back to Todo.`;
+    }
+    if (drag.fromCol === 4) {
+      return `Done is final — merged PRs can't move back.`;
+    }
+    if (drag.fromCol === 3 && toCol === 2) {
+      return `Review → In Progress would need to close the PR. Use the row menu.`;
+    }
+    if (drag.fromCol === 2 && toCol === 4) {
+      return `Skip Review isn't allowed — drop on Review first.`;
+    }
+    if (drag.fromCol === 1 && (toCol === 3 || toCol === 4)) {
+      return `Plan must go through In Progress first.`;
+    }
+    return `Move from ${COL_NAMES[drag.fromCol]} to ${COL_NAMES[toCol]} isn't allowed.`;
+  }
+
+  function handleDrop(toCol: number, toIndex: number, drag: DragInfo) {
+    if (!dragAccepts(drag, toCol)) {
+      const reason = rejectionReason(drag, toCol);
+      addToast(`Cannot move "${drag.title}" to ${COL_NAMES[toCol]}: ${reason}`, "error");
+      return;
+    }
+
+    // Todo → Todo reorder
+    if (drag.fromCol === 0 && toCol === 0) {
+      const fromIdx = todos.findIndex((t) => t.id === drag.cardId);
+      if (fromIdx < 0) return;
+      const ids = todos.map((t) => t.id);
+      ids.splice(fromIdx, 1);
+      // toIndex was computed against the live DOM that still contains the dragged card,
+      // so account for the removal when it lands after the original slot.
+      const insertAt = toIndex > fromIdx ? toIndex - 1 : toIndex;
+      ids.splice(Math.max(0, Math.min(insertAt, ids.length)), 0, drag.cardId);
+      onReorderTodos?.(ids);
+      return;
+    }
+
+    // Todo → Design = spawn agent in plan mode
+    if (drag.fromCol === 0 && toCol === 1) {
+      onSpawnDesign(drag.cardId);
+      return;
+    }
+
+    // Todo → In Progress = spawn agent (skip design)
+    if (drag.fromCol === 0 && toCol === 2) {
+      onSpawnAgent(drag.cardId);
+      return;
+    }
+
+    // Design → In Progress = flip to bypassPermissions and start implementing
+    if (drag.fromCol === 1 && toCol === 2) {
+      onAdvanceFromDesign(drag.cardId);
+      return;
+    }
+
+    // In Progress → Review = push to remote (PR creation is a separate manual action)
+    if (drag.fromCol === 2 && toCol === 3) {
+      if (onPush) onPush(drag.cardId);
+      else addToast("Push not wired", "error");
+      return;
+    }
+
+    // Review → Done = merge PR
+    if (drag.fromCol === 3 && toCol === 4) {
+      if (onMergePr) onMergePr(drag.cardId);
+      else addToast("Merge not wired", "error");
+      return;
+    }
+  }
+
+  function columnAccepts(col: number): (drag: DragInfo) => boolean {
+    return (drag) => dragAccepts(drag, col);
+  }
+
+  function handleDragStart() {
+    focusedCol = -1;
+    focusedRow = 0;
+  }
 
   function colLen(col: number): number {
     return columnItems[col]?.length ?? 0;
@@ -142,9 +283,9 @@
 
   function findFirstNonEmptyCol(startDir: "forward" | "backward"): number {
     if (startDir === "forward") {
-      for (let i = 0; i < 4; i++) { if (colLen(i) > 0) return i; }
+      for (let i = 0; i < 5; i++) { if (colLen(i) > 0) return i; }
     } else {
-      for (let i = 3; i >= 0; i--) { if (colLen(i) > 0) return i; }
+      for (let i = 4; i >= 0; i--) { if (colLen(i) > 0) return i; }
     }
     return -1;
   }
@@ -189,7 +330,7 @@
         } else {
           const dir = key === "ArrowRight" ? 1 : -1;
           let next = focusedCol + dir;
-          while (next >= 0 && next < 4) {
+          while (next >= 0 && next < 5) {
             if (colLen(next) > 0) {
               focusedCol = next;
               focusedRow = Math.min(focusedRow, colLen(next) - 1);
@@ -206,7 +347,7 @@
           const todo = todos[focusedRow];
           if (todo) editingTodo = todo;
         } else {
-          const lists = [null, inProgress, review, done];
+          const lists = [null, design, inProgress, review, done];
           const ws = lists[focusedCol]?.[focusedRow];
           if (ws) {
             if (e.metaKey) onCardClick(ws.id);
@@ -292,7 +433,7 @@
 
 <div class="kanban-wrapper">
 <div class="kanban-board" bind:this={boardEl}>
-  <KanbanColumn title="Todo" count={todos.length}>
+  <KanbanColumn title="Todo" count={todos.length} col={0} accepts={columnAccepts(0)}>
     {#each todos as todo, i (todo.id)}
       <KanbanCard
         type="todo"
@@ -305,11 +446,14 @@
         model={todo.model}
         ready={todo.ready ?? false}
         focused={focusedCol === 0 && focusedRow === i}
+        col={0}
         {repoName}
-        onAction={() => onSpawnAgent(todo.id)}
+        onAction={() => onStartDefault(todo.id)}
         onEdit={() => { editingTodo = todo; }}
         onRemove={() => onRemoveTodo(todo.id)}
         onToggleReady={() => onToggleReady(todo.id)}
+        onDragStart={handleDragStart}
+        onDrop={handleDrop}
       />
     {/each}
     {#if todos.length === 0}
@@ -327,7 +471,31 @@
     {/snippet}
   </KanbanColumn>
 
-  <KanbanColumn title="In Progress" count={inProgress.length}>
+  {#if planColumnVisible}
+    <KanbanColumn title="Plan" count={design.length} col={1} accepts={columnAccepts(1)}>
+      {#each design as ws, i (ws.id)}
+        <KanbanCard
+          type="workspace"
+          workspace={ws}
+          prStatus={prStatusMap.get(ws.id)}
+          changeCounts={changeCounts.get(ws.id)}
+          isReviewing={reviewingWsIds.has(ws.id)}
+          isCreating={ws.id === creatingWsId}
+          focused={focusedCol === 1 && focusedRow === i}
+          col={1}
+          onClick={(e) => { e.metaKey ? onCardClick(ws.id) : detailWs = ws; }}
+          onRemove={() => onRemoveWorkspace(ws.id)}
+          onDragStart={handleDragStart}
+          onDrop={handleDrop}
+        />
+      {/each}
+      {#if design.length === 0}
+        <div class="empty-hint">Drop a task here to plan first</div>
+      {/if}
+    </KanbanColumn>
+  {/if}
+
+  <KanbanColumn title="In Progress" count={inProgress.length} col={2} accepts={columnAccepts(2)}>
     {#each inProgress as ws, i (ws.id)}
       <KanbanCard
         type="workspace"
@@ -336,9 +504,12 @@
         changeCounts={changeCounts.get(ws.id)}
         isReviewing={reviewingWsIds.has(ws.id)}
         isCreating={ws.id === creatingWsId}
-        focused={focusedCol === 1 && focusedRow === i}
+        focused={focusedCol === 2 && focusedRow === i}
+        col={2}
         onClick={(e) => { e.metaKey ? onCardClick(ws.id) : detailWs = ws; }}
         onRemove={() => onRemoveWorkspace(ws.id)}
+        onDragStart={handleDragStart}
+        onDrop={handleDrop}
       />
     {/each}
     {#if inProgress.length === 0}
@@ -346,7 +517,7 @@
     {/if}
   </KanbanColumn>
 
-  <KanbanColumn title="Review" count={review.length} accent={review.length > 0}>
+  <KanbanColumn title="Review" count={review.length} accent={review.length > 0} col={3} accepts={columnAccepts(3)}>
     {#each review as ws, i (ws.id)}
       <KanbanCard
         type="workspace"
@@ -354,9 +525,12 @@
         prStatus={prStatusMap.get(ws.id)}
         changeCounts={changeCounts.get(ws.id)}
         isReviewing={reviewingWsIds.has(ws.id)}
-        focused={focusedCol === 2 && focusedRow === i}
+        focused={focusedCol === 3 && focusedRow === i}
+        col={3}
         onClick={(e) => { e.metaKey ? onCardClick(ws.id) : detailWs = ws; }}
         onRemove={() => onRemoveWorkspace(ws.id)}
+        onDragStart={handleDragStart}
+        onDrop={handleDrop}
       />
     {/each}
     {#if review.length === 0}
@@ -364,16 +538,19 @@
     {/if}
   </KanbanColumn>
 
-  <KanbanColumn title="Done" count={done.length} dimmed>
+  <KanbanColumn title="Done" count={done.length} dimmed col={4} accepts={columnAccepts(4)}>
     {#each done as ws, i (ws.id)}
       <KanbanCard
         type="workspace"
         workspace={ws}
         prStatus={prStatusMap.get(ws.id)}
         changeCounts={changeCounts.get(ws.id)}
-        focused={focusedCol === 3 && focusedRow === i}
+        focused={focusedCol === 4 && focusedRow === i}
+        col={4}
         onClick={(e) => { e.metaKey ? onCardClick(ws.id) : detailWs = ws; }}
         onRemove={() => onRemoveWorkspace(ws.id)}
+        onDragStart={handleDragStart}
+        onDrop={handleDrop}
       />
     {/each}
     {#if done.length === 0}
@@ -410,6 +587,7 @@
   <TaskPopover
     {repoId}
     initialThinkingMode={defaultThinkingMode}
+    initialPlanMode={defaultPlanMode}
     submitLabel="Add"
     onSubmit={handleAddSubmit}
     onSubmitAndStart={handleAddAndStartSubmit}

@@ -6,7 +6,12 @@
       "Bash(bun add:*)",
       "Bash(bun install:*)",
       "Bash(claude -p --output-format json)",
-      "Bash(claude --version)"
+      "Bash(claude --version)",
+      "Bash(grep 'const\\\\|let\\\\|$derived')",
+      "Bash(openspec --help)",
+      "Bash(openspec change *)",
+      "Bash(openspec instructions *)",
+      "Bash(grep -n 'design\\\\s*=\\\\|\\\\bdesign:\\\\|design:\\\\s*$derived\\\\|let design\\\\|const design\\\\|phase\\\\s*===\\\\|phase.*Design\\\\|isDesign\\\\|filterDesign' src/routes/+page.svelte)"
     ]
   }
 }

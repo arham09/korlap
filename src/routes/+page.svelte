@@ -10,7 +10,10 @@
     createWorkspaceFromPr,
     createComboWorkspace,
     removeWorkspace,
+    archiveWorkspace,
     listWorkspaces,
+    setWorkspacePhase,
+    advanceToImplementation,
     sendMessage,
     listModels,
     saveImage,
@@ -166,6 +169,13 @@
     wsName?: string;
   }
   let autopilotEvents = $state<AutopilotEvent[]>([]);
+
+  function slugifyTitle(input: string): string {
+    return input
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
 
   function addAutopilotEvent(type: AutopilotEvent["type"], message: string, wsId?: string, wsName?: string) {
     autopilotEvents.push({ id: crypto.randomUUID(), time: Date.now(), type, message, wsId, wsName });
@@ -568,17 +578,32 @@
 
   // ── Kanban derived state ────────────────────────────────
   let todoItems = $derived(todos.filter((t) => t.repo_id === activeRepo?.id));
+  // Plan column is fully sticky: while a workspace is in spec phase it stays here
+  // regardless of PR state (none/open/merged/closed). The only way out is the
+  // manual Plan → In Progress drag, which flips phase to "implementing".
+  let designWs = $derived(
+    activeWorkspaces.filter((ws) => ws.phase === "spec"),
+  );
   let inProgressWs = $derived(
     activeWorkspaces.filter((ws) => {
+      if (ws.phase === "spec") return false;
       const pr = prStatusMap.get(ws.id);
-      return !pr || pr.state === "none";
+      const noPr = !pr || pr.state === "none";
+      return noPr;
     }),
   );
+  // Review: only implementing-phase workspaces with an open PR.
   let reviewWs = $derived(
-    activeWorkspaces.filter((ws) => prStatusMap.get(ws.id)?.state === "open"),
+    activeWorkspaces.filter((ws) => {
+      if (ws.phase === "spec") return false;
+      return prStatusMap.get(ws.id)?.state === "open";
+    }),
   );
   let doneWs = $derived(
-    activeWorkspaces.filter((ws) => prStatusMap.get(ws.id)?.state === "merged"),
+    activeWorkspaces.filter((ws) => {
+      if (ws.phase === "spec") return false;
+      return prStatusMap.get(ws.id)?.state === "merged";
+    }),
   );
   // Review alert: show completed reviews (not running ones)
   let completedReviewWs = $derived(
@@ -884,6 +909,9 @@
       hydratePrStatusFromCache(ws.map((w) => w.id), prStatusMap);
       ws.forEach((w) => loadPersistedMessages(w.id));
       ws.forEach((w) => {
+        if (w.phase === "spec") planModeByWorkspace.set(w.id, true);
+      });
+      ws.forEach((w) => {
         refreshChangeCounts(w.id);
         refreshPrStatus(w.id);
         // Load provider info per workspace (non-blocking)
@@ -1131,9 +1159,17 @@
     }
   }
 
+  // Default start phase honoring the OpenSpec gate: if OpenSpec is off, force
+  // "implementing" even when the repo setting says "spec" — keeps the workflow
+  // consistent with the hidden Plan column.
+  function effectiveStartPhase(): "spec" | "implementing" {
+    if (!repoSettings?.openspec_enabled) return "implementing";
+    return repoSettings?.default_start_phase ?? "implementing";
+  }
+
   async function handleNewTodoAndStart(data: { title: string; description: string; newImages: PastedImage[]; existingPaths: string[]; mentions?: Mention[]; planMode?: boolean; thinkingMode?: boolean; model?: string; provider?: AgentProvider }) {
     const todoId = await handleNewTodo(data);
-    if (todoId) await handleSpawnFromTodo(todoId);
+    if (todoId) await handleSpawnFromTodo(todoId, effectiveStartPhase());
   }
 
   async function handleEditTodo(todoId: string, data: { title: string; description: string; newImages: PastedImage[]; existingPaths: string[]; mentions?: Mention[]; planMode?: boolean; thinkingMode?: boolean; model?: string; provider?: AgentProvider }) {
@@ -1351,7 +1387,7 @@
         const todo = readyTodos.find(t => t.id === nextId);
         if (todo) {
           addAutopilotEvent("spawn", `Spawning agent for "${todo.title}"`, undefined, todo.title);
-          handleSpawnFromTodo(todo.id);
+          handleSpawnFromTodo(todo.id, effectiveStartPhase());
           return;
         }
       }
@@ -1519,7 +1555,7 @@
     if (autopilotEnabled) evaluateAutopilot();
   }
 
-  async function handleSpawnFromTodo(todoId: string) {
+  async function handleSpawnFromTodo(todoId: string, phase: "spec" | "implementing" = "implementing") {
     if (!activeRepo || creatingWsId) return;
     const todo = todos.find((t) => t.id === todoId);
     if (!todo) return;
@@ -1538,6 +1574,7 @@
       task_title: todo.title,
       task_description: todo.description || null,
       source_todo_id: todoId,
+      phase,
     };
     creatingWsId = tempId;
     workspaces.push(placeholder);
@@ -1546,13 +1583,15 @@
     // Optimistically remove the todo card immediately on start
     handleRemoveTodo(todoId);
 
+    const usePlanMode = phase === "spec" || (todo.planMode ?? false);
+
     try {
-      const ws = await createWorkspace(repoId, todo.title, todo.description || undefined, todoId);
+      const ws = await createWorkspace(repoId, todo.title, todo.description || undefined, todoId, undefined, phase);
       const idx = workspaces.findIndex((w) => w.id === tempId);
       if (idx >= 0) workspaces[idx] = ws;
       selectedWsId = ws.id;
       creatingWsId = null;
-      if (todo.planMode) planModeByWorkspace.set(ws.id, true);
+      if (usePlanMode) planModeByWorkspace.set(ws.id, true);
       if (todo.model) modelByWorkspace.set(ws.id, todo.model);
 
       // Set provider override if task specifies a non-default provider
@@ -1605,7 +1644,7 @@
         fullPrompt,
         images: [],
         mentions: [],
-        planMode: todo.planMode ?? false,
+        planMode: usePlanMode,
         thinkingMode: todo.thinkingMode ?? repoSettings?.default_thinking ?? false,
         model: todo.model ?? "",
         hidden: true,
@@ -1625,6 +1664,58 @@
     }
   }
 
+  async function handleAdvanceFromDesign(wsId: string) {
+    const ws = workspaces.find((w) => w.id === wsId);
+    if (!ws) return;
+
+    // Capture original identifiers for the prompt slug — when OpenSpec branches
+    // to impl/<slug>, ws.branch changes, but the proposal slug must stay tied
+    // to the original task.
+    const originalTitle = ws.task_title ?? ws.branch;
+
+    let updated;
+    try {
+      updated = await advanceToImplementation(wsId);
+    } catch (e) {
+      addToast(`Could not advance workspace: ${e}`, "error");
+      return;
+    }
+
+    // Stale state from the proposal branch — the impl branch is brand new.
+    // Clear synchronously before swapping in `updated` so the kanban derived
+    // filters route directly to In Progress (no flicker through Review).
+    prStatusMap.delete(wsId);
+    changeCounts.delete(wsId);
+
+    const idx = workspaces.findIndex((w) => w.id === wsId);
+    if (idx >= 0) workspaces[idx] = updated;
+
+    planModeByWorkspace.set(wsId, false);
+
+    // Repopulate fresh state for the new branch in the background.
+    refreshChangeCounts(wsId);
+    refreshPrStatus(wsId);
+
+    const baseText = "Proceed with implementation of the plan above.";
+    const slug = slugifyTitle(originalTitle);
+    const promptText = repoSettings?.openspec_enabled
+      ? (slug
+          ? `/opsx:apply\n\nApply proposal: ${slug}\n\n${baseText}`
+          : `/opsx:apply\n\n${baseText}`)
+      : baseText;
+    routeMessage(wsId, {
+      id: crypto.randomUUID(),
+      prompt: promptText,
+      fullPrompt: promptText,
+      images: [],
+      mentions: [],
+      planMode: false,
+      thinkingMode: thinkingModeByWorkspace.get(wsId) ?? repoSettings?.default_thinking ?? false,
+      model: modelByWorkspace.get(wsId) ?? "",
+      hidden: false,
+    });
+  }
+
   function handleKanbanCardClick(wsId: string) {
     selectedWsId = wsId;
     appMode = "work";
@@ -1635,21 +1726,10 @@
 
   // ── Workspace handlers ────────────────────────────────
 
-  async function handleRemove(wsId: string) {
-    const ws = workspaces.find((w) => w.id === wsId);
-    const name = ws?.name ?? wsId;
-
-    const confirmed = await confirm(
-      `This will permanently remove "${name}" — its worktree, messages, and session data will be deleted.`,
-      { title: "Remove workspace?", kind: "warning", okLabel: "Remove", cancelLabel: "Cancel" },
-    );
-    if (!confirmed) return;
-
-
-
-    // Optimistic: remove from UI immediately
+  // Splice the workspace out of the array and clear all per-workspace stores.
+  // Backend `removeWorkspace` is the caller's responsibility.
+  function cleanupWorkspaceLocalState(wsId: string) {
     const idx = workspaces.findIndex((w) => w.id === wsId);
-    const removed = idx >= 0 ? workspaces[idx] : null;
     if (idx >= 0) workspaces.splice(idx, 1);
     if (selectedWsId === wsId) selectedWsId = null;
     if (creatingWsId === wsId) creatingWsId = null;
@@ -1665,10 +1745,22 @@
     planModeByWorkspace.delete(wsId);
     thinkingModeByWorkspace.delete(wsId);
     modelByWorkspace.delete(wsId);
+  }
+
+  async function handleRemove(wsId: string) {
+    const ws = workspaces.find((w) => w.id === wsId);
+    const name = ws?.name ?? wsId;
+
+    const confirmed = await confirm(
+      `This will permanently remove "${name}" — its worktree, messages, and session data will be deleted.`,
+      { title: "Remove workspace?", kind: "warning", okLabel: "Remove", cancelLabel: "Cancel" },
+    );
+    if (!confirmed) return;
+
+    cleanupWorkspaceLocalState(wsId);
 
     removeWorkspace(wsId).catch((e) => {
-      // Restore on failure
-      if (removed) workspaces.push(removed);
+      if (ws) workspaces.push(ws);
       addToast(String(e));
     });
   }
@@ -1684,23 +1776,28 @@
     if (!confirmed) return;
 
     for (const wsId of ids) {
-      const idx = workspaces.findIndex((w) => w.id === wsId);
-      if (idx >= 0) workspaces.splice(idx, 1);
-      if (selectedWsId === wsId) selectedWsId = null;
-      if (creatingWsId === wsId) creatingWsId = null;
-      clearWorkspaceData(wsId);
-      sendingByWorkspace.delete(wsId);
-      queueByWorkspace.delete(wsId);
-      pendingDrain.delete(wsId);
-      prStatusMap.delete(wsId);
-      removePrStatusCacheEntry(wsId);
-      changeCounts.delete(wsId);
-      planModeByWorkspace.delete(wsId);
-      thinkingModeByWorkspace.delete(wsId);
-
+      cleanupWorkspaceLocalState(wsId);
       removeWorkspace(wsId).catch((e) => {
         addToast(String(e));
       });
+    }
+  }
+
+  // Fired from refreshPrStatus when a PR transitions to merged. Deletes the
+  // worktree + agent process but keeps the workspace entry so the card stays
+  // visible in the Done column as a record. No confirmation: the user opted in
+  // by merging the PR, and the implementation is on origin now.
+  async function autoArchiveOnMerge(wsId: string) {
+    const ws = workspaces.find((w) => w.id === wsId);
+    if (!ws || ws.archived) return;
+    const name = ws.name;
+    try {
+      const updated = await archiveWorkspace(wsId);
+      const idx = workspaces.findIndex((w) => w.id === wsId);
+      if (idx >= 0) workspaces[idx] = updated;
+      addToast(`Archived "${name}" — worktree removed, card kept in Done`, "success");
+    } catch (e) {
+      addToast(`Could not archive "${name}": ${e}`, "error");
     }
   }
 
@@ -1975,6 +2072,127 @@
     }
   }
 
+  // Combined commit + push — used by the kanban drag InProgress → Review.
+  // The workspace-panel buttons use the split versions (triggerCommitAction /
+  // triggerPushAction) below.
+  async function triggerCommitAndPushAction(wsId: string) {
+    const ws = workspaces.find(w => w.id === wsId);
+    if (!ws || !activeRepo) return;
+    if (gitOpInProgress.get(wsId)) return;
+
+    const files = await getChangedFiles(wsId).catch(() => []);
+
+    gitOpInProgress.set(wsId, true);
+    try {
+      if (files.length > 0) {
+        addActionMessage(wsId, crypto.randomUUID(), "Committing & pushing changes");
+        const msg = await generateCommitMessage(wsId);
+        try {
+          await gitCommit(wsId, msg);
+        } catch (commitErr) {
+          if (!String(commitErr).includes("Nothing to commit")) throw commitErr;
+        }
+        await gitPush(wsId);
+      } else {
+        addActionMessage(wsId, crypto.randomUUID(), "Pushing to origin");
+        await gitPush(wsId);
+      }
+      addToast("Pushed successfully", "success");
+      refreshChangeCounts(wsId);
+      refreshPrStatus(wsId);
+    } catch (e) {
+      addToast(String(e));
+      sendPrompt(wsId, `This git operation failed:\n\n\`\`\`\n${e}\n\`\`\`\n\nDiagnose the issue and fix it.`, "Fixing git error");
+    } finally {
+      gitOpInProgress.delete(wsId);
+    }
+  }
+
+  async function triggerCommitAction(wsId: string) {
+    const ws = workspaces.find(w => w.id === wsId);
+    if (!ws || !activeRepo) return;
+    if (gitOpInProgress.get(wsId)) return;
+
+    const files = await getChangedFiles(wsId).catch(() => []);
+    if (files.length === 0) {
+      addToast("Nothing to commit", "info");
+      return;
+    }
+
+    gitOpInProgress.set(wsId, true);
+    try {
+      addActionMessage(wsId, crypto.randomUUID(), "Committing changes");
+      const msg = await generateCommitMessage(wsId);
+      try {
+        await gitCommit(wsId, msg);
+      } catch (commitErr) {
+        if (!String(commitErr).includes("Nothing to commit")) throw commitErr;
+      }
+      addToast("Committed successfully", "success");
+      refreshChangeCounts(wsId);
+      refreshPrStatus(wsId);
+    } catch (e) {
+      addToast(String(e));
+      sendPrompt(wsId, `This git operation failed:\n\n\`\`\`\n${e}\n\`\`\`\n\nDiagnose the issue and fix it.`, "Fixing git error");
+    } finally {
+      gitOpInProgress.delete(wsId);
+    }
+  }
+
+  async function triggerPushAction(wsId: string) {
+    const ws = workspaces.find(w => w.id === wsId);
+    if (!ws || !activeRepo) return;
+    if (gitOpInProgress.get(wsId)) return;
+
+    gitOpInProgress.set(wsId, true);
+    try {
+      addActionMessage(wsId, crypto.randomUUID(), "Pushing to origin");
+      await gitPush(wsId);
+      addToast("Pushed successfully", "success");
+      refreshChangeCounts(wsId);
+      refreshPrStatus(wsId);
+    } catch (e) {
+      addToast(String(e));
+      sendPrompt(wsId, `This git operation failed:\n\n\`\`\`\n${e}\n\`\`\`\n\nDiagnose the issue and fix it.`, "Fixing git error");
+    } finally {
+      gitOpInProgress.delete(wsId);
+    }
+  }
+
+  async function triggerCreatePrAction(wsId: string) {
+    const ws = workspaces.find(w => w.id === wsId);
+    if (!ws || !activeRepo) return;
+    if (gitOpInProgress.get(wsId)) return;
+
+    const baseBranch = activeRepo.default_branch;
+    const files = await getChangedFiles(wsId).catch(() => []);
+    const template = await getPrTemplate(activeRepo.id).catch(() => "");
+
+    let prompt: string;
+    const customMsg = repoSettings?.pr_message?.trim();
+
+    if (customMsg) {
+      prompt = customMsg
+        .replace(/\{\{branch\}\}/g, ws.branch)
+        .replace(/\{\{base_branch\}\}/g, baseBranch)
+        .replace(/\{\{file_count\}\}/g, String(files.length))
+        .replace(/\{\{pr_template\}\}/g, template
+          ? `\n## PR Description Template\n\nThis workspace has a PR template. Use it:\n\n\`\`\`markdown\n${template}\n\`\`\`\n`
+          : "");
+    } else {
+      prompt = `The code is already committed and pushed to origin.\n\n`;
+      prompt += `Create a pull request using \`gh pr create --base ${baseBranch}\`.\n`;
+      prompt += `Keep the title under 80 characters. Keep the description under five sentences unless there's a template.\n`;
+      prompt += `Base your PR title and description on what we've been working on in this conversation.\n`;
+
+      if (template) {
+        prompt += `\n## PR Description Template\n\nThis repo has a PR template. Use it:\n\n\`\`\`markdown\n${template}\n\`\`\`\n`;
+      }
+    }
+
+    sendPrompt(wsId, prompt, "Creating pull request");
+  }
+
   async function triggerPrAction(wsId: string, opts?: { skipMerge?: boolean }) {
     const ws = workspaces.find(w => w.id === wsId);
     if (!ws || !activeRepo) return;
@@ -2069,63 +2287,74 @@
       return;
     }
 
-    // ── No PR: commit & push directly, then agent creates PR ──
-    const baseBranch = activeRepo.default_branch;
-    const files = await getChangedFiles(wsId).catch(() => []);
-    const template = await getPrTemplate(activeRepo.id).catch(() => "");
-
-    gitOpInProgress.set(wsId, true);
-    try {
-      if (files.length > 0) {
-        addActionMessage(wsId, crypto.randomUUID(), "Committing & pushing changes");
-        const msg = await generateCommitMessage(wsId);
-        try {
-          await gitCommit(wsId, msg);
-        } catch (commitErr) {
-          if (!String(commitErr).includes("Nothing to commit")) throw commitErr;
-        }
-        await gitPush(wsId);
-      } else {
-        addActionMessage(wsId, crypto.randomUUID(), "Pushing to origin");
-        await gitPush(wsId);
-      }
-    } catch (e) {
-      addToast(String(e));
-      sendPrompt(wsId, `This git operation failed:\n\n\`\`\`\n${e}\n\`\`\`\n\nDiagnose the issue and fix it.`, "Fixing git error");
-      gitOpInProgress.delete(wsId);
-      return;
-    }
-    gitOpInProgress.delete(wsId);
-
-    let prompt: string;
-    const customMsg = repoSettings?.pr_message?.trim();
-
-    if (customMsg) {
-      prompt = customMsg
-        .replace(/\{\{branch\}\}/g, ws.branch)
-        .replace(/\{\{base_branch\}\}/g, baseBranch)
-        .replace(/\{\{file_count\}\}/g, String(files.length))
-        .replace(/\{\{pr_template\}\}/g, template
-          ? `\n## PR Description Template\n\nThis workspace has a PR template. Use it:\n\n\`\`\`markdown\n${template}\n\`\`\`\n`
-          : "");
-    } else {
-      prompt = `The code is already committed and pushed to origin.\n\n`;
-      prompt += `Create a pull request using \`gh pr create --base ${baseBranch}\`.\n`;
-      prompt += `Keep the title under 80 characters. Keep the description under five sentences unless there's a template.\n`;
-      prompt += `Base your PR title and description on what we've been working on in this conversation.\n`;
-
-      if (template) {
-        prompt += `\n## PR Description Template\n\nThis repo has a PR template. Use it:\n\n\`\`\`markdown\n${template}\n\`\`\`\n`;
-      }
-    }
-
-    sendPrompt(wsId, prompt, "Creating pull request");
+    // ── No PR: handled by triggerPushAction / triggerCreatePrAction (called from separate buttons) ──
   }
 
   async function handlePrAction() {
     if (!selectedWs) return;
     chatExpanded = true;
     triggerPrAction(selectedWs.id);
+  }
+
+  async function handleCommitAction() {
+    if (!selectedWs) return;
+    triggerCommitAction(selectedWs.id);
+  }
+
+  async function handlePushAction() {
+    if (!selectedWs) return;
+    triggerPushAction(selectedWs.id);
+  }
+
+  async function handleCreatePrAction() {
+    if (!selectedWs) return;
+    chatExpanded = true;
+    triggerCreatePrAction(selectedWs.id);
+  }
+
+  // ── Kanban drag-and-drop callbacks ─────────────────────
+
+  async function handleDragPush(wsId: string) {
+    const ws = workspaces.find((w) => w.id === wsId);
+    if (!ws) return;
+    const label = ws.task_title ?? ws.name;
+    const ok = await confirm(
+      `Commit local changes (if any) and push "${ws.branch}" to origin for "${label}"?`,
+      { title: "Push to remote?", kind: "info", okLabel: "Push", cancelLabel: "Cancel" },
+    );
+    if (!ok) return;
+    triggerCommitAndPushAction(wsId);
+  }
+
+  async function handleDragMergePr(wsId: string) {
+    const ws = workspaces.find((w) => w.id === wsId);
+    if (!ws) return;
+    const pr = prStatusMap.get(wsId);
+    if (!pr || pr.state !== "open") {
+      addToast("PR is not open — cannot merge", "error");
+      return;
+    }
+    const label = ws.task_title ?? ws.name;
+    const ok = await confirm(
+      `This will merge PR #${pr.number} ("${label}") into ${activeRepo?.default_branch ?? "the base branch"}. This cannot be undone.`,
+      { title: "Merge PR?", kind: "warning", okLabel: `Merge #${pr.number}`, cancelLabel: "Cancel" },
+    );
+    if (!ok) return;
+    triggerPrAction(wsId);
+  }
+
+  function handleReorderTodos(orderedIds: string[]) {
+    if (!activeRepo) return;
+    const repoId = activeRepo.id;
+    const byId = new Map(todos.filter((t) => t.repo_id === repoId).map((t) => [t.id, t] as const));
+    const others = todos.filter((t) => t.repo_id !== repoId);
+    const reordered: TodoItem[] = [];
+    for (const id of orderedIds) {
+      const t = byId.get(id);
+      if (t) reordered.push(t);
+    }
+    todos = [...others, ...reordered];
+    persistTodos();
   }
 
   async function handleStop() {
@@ -2277,11 +2506,23 @@
   // Thin wrappers binding the reactive maps to the extracted helpers
   const refreshChangeCounts = (wsId: string) => _refreshChangeCounts(wsId, changeCounts);
   const refreshPrStatus = async (wsId: string): Promise<boolean> => {
+    const prevState = prStatusMap.get(wsId)?.state;
     const changed = await _refreshPrStatus(wsId, prStatusMap);
     if (changed) {
       rebuildStaging();
       const pr = prStatusMap.get(wsId);
       if (pr && pr.state !== "none") autopilotPrPending.delete(wsId);
+
+      // Auto-archive once the PR transitions to merged: delete the worktree but
+      // keep the card in Done. Spec-phase workspaces stay in Plan even with a
+      // merged PR (Plan stickiness rule), and the staging workspace has its
+      // own lifecycle.
+      if (prevState !== "merged" && pr?.state === "merged") {
+        const ws = workspaces.find((w) => w.id === wsId);
+        if (ws && !ws.archived && ws.phase !== "spec" && ws.id !== stagingWsId) {
+          autoArchiveOnMerge(wsId);
+        }
+      }
     }
     return changed;
   };
@@ -2580,6 +2821,7 @@
             {stagingError}
             {rebuildingStaging}
             stagingMergedCount={stagingMergedBranches.length}
+            openspecEnabled={!!repoSettings?.openspec_enabled}
           />
 
           <WorkspacePanel
@@ -2614,7 +2856,11 @@
             {providerInfoByWorkspace}
             onProviderSwitch={handleProviderSwitch}
             onPrAction={handlePrAction}
+            onCommitAction={handleCommitAction}
+            onPushAction={handlePushAction}
+            onCreatePrAction={handleCreatePrAction}
             onUpdateBranch={handleUpdateBranch}
+            onAdvance={() => { if (selectedWsId) handleAdvanceFromDesign(selectedWsId); }}
             onReview={handleReview}
             reviewRunning={selectedWsId ? reviewByWorkspace.get(selectedWsId)?.status === "running" : false}
             operationInProgress={selectedWsId ? gitOpInProgress.get(selectedWsId) ?? false : false}
@@ -2664,6 +2910,7 @@
           <KanbanBoard
             bind:this={kanbanRef}
             todos={todoItems}
+            design={designWs}
             inProgress={inProgressWs}
             review={reviewWs}
             done={doneWs}
@@ -2674,9 +2921,14 @@
             repoId={activeRepo.id}
             repoName={activeRepo.display_name}
             defaultThinkingMode={repoSettings?.default_thinking ?? false}
+            defaultPlanMode={repoSettings?.default_plan ?? false}
             active={appMode === "plan" && planView === "kanban"}
+            openspecEnabled={!!repoSettings?.openspec_enabled}
             onCardClick={handleKanbanCardClick}
-            onSpawnAgent={handleSpawnFromTodo}
+            onSpawnAgent={(id) => handleSpawnFromTodo(id, "implementing")}
+            onSpawnDesign={(id) => handleSpawnFromTodo(id, "spec")}
+            onStartDefault={(id) => handleSpawnFromTodo(id, effectiveStartPhase())}
+            onAdvanceFromDesign={handleAdvanceFromDesign}
             onNewTodo={handleNewTodo}
             onAddAndStart={handleNewTodoAndStart}
             onEditTodo={handleEditTodo}
@@ -2687,6 +2939,9 @@
             onManualCheckout={handleManualCheckout}
             onPrCheckout={handlePrCheckout}
             onComboCheckout={handleComboCheckout}
+            onReorderTodos={handleReorderTodos}
+            onPush={handleDragPush}
+            onMergePr={handleDragMergePr}
             {autopilotEnabled}
             {autopilotEvents}
             autopilotActiveAgents={activeAgentCount}
