@@ -1,5 +1,5 @@
 use crate::git_provider::SharedProviderRegistry;
-use crate::state::{AppState, WorkspaceInfo, WorkspaceStatus};
+use crate::state::{AppState, WorkspaceInfo, WorkspacePhase, WorkspaceStatus};
 use std::sync::{Arc, Mutex};
 use tauri::State;
 use uuid::Uuid;
@@ -208,6 +208,8 @@ pub async fn create_staging_workspace(
         source_pr: None,
         source_prs: None,
         base_branch: None,
+        phase: WorkspacePhase::default(),
+        archived: false,
     };
 
     let mut st = state.lock().map_err(|e| e.to_string())?;

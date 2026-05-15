@@ -38,6 +38,8 @@
     default_thinking: false,
     default_plan: false,
     caveman_ultra: false,
+    openspec_enabled: false,
+    default_start_phase: "implementing",
     system_prompt: "",
     lsp_servers: {},
     mcp_servers: {},
@@ -864,6 +866,30 @@
               onclick={() => { settings.caveman_ultra = !settings.caveman_ultra; scheduleAutosave(); }}
               role="switch"
               aria-checked={settings.caveman_ultra}
+            >
+              <span class="toggle-knob"></span>
+            </button>
+          </label>
+          <label class="toggle-row">
+            <span class="toggle-label">OpenSpec integration</span>
+            <button
+              class="toggle-switch"
+              class:on={settings.openspec_enabled}
+              onclick={() => { settings.openspec_enabled = !settings.openspec_enabled; scheduleAutosave(); }}
+              role="switch"
+              aria-checked={settings.openspec_enabled}
+            >
+              <span class="toggle-knob"></span>
+            </button>
+          </label>
+          <label class="toggle-row">
+            <span class="toggle-label" use:tooltip={{ text: "Start button creates a Plan workspace by default. Drag a todo directly to In Progress to skip planning." }}>Start in Plan phase</span>
+            <button
+              class="toggle-switch"
+              class:on={settings.default_start_phase === "spec"}
+              onclick={() => { settings.default_start_phase = settings.default_start_phase === "spec" ? "implementing" : "spec"; scheduleAutosave(); }}
+              role="switch"
+              aria-checked={settings.default_start_phase === "spec"}
             >
               <span class="toggle-knob"></span>
             </button>

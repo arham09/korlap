@@ -196,12 +196,12 @@ impl AgentBackend for ClaudeBackend {
         // Grant agent access to images directory
         cmd.arg("--add-dir").arg(&ctx.images_dir);
 
-        // Model override
-        if let Some(ref model_id) = ctx.model {
-            if !model_id.is_empty() {
-                cmd.args(["--model", model_id]);
-            }
-        }
+        // Model override — default to Opus when the user hasn't picked one.
+        let effective_model = match ctx.model.as_deref() {
+            Some(m) if !m.is_empty() => m,
+            _ => "opus",
+        };
+        cmd.args(["--model", effective_model]);
 
         // Thinking mode
         if ctx.thinking_mode {
@@ -385,15 +385,15 @@ impl AgentBackend for ClaudeBackend {
         vec![
             ModelOption {
                 value: String::new(),
-                label: "Default".into(),
-            },
-            ModelOption {
-                value: "sonnet".into(),
-                label: "Sonnet".into(),
+                label: "Default (Opus)".into(),
             },
             ModelOption {
                 value: "opus".into(),
                 label: "Opus".into(),
+            },
+            ModelOption {
+                value: "sonnet".into(),
+                label: "Sonnet".into(),
             },
             ModelOption {
                 value: "haiku".into(),

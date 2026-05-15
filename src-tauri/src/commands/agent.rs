@@ -1,5 +1,5 @@
 use crate::git_provider::SharedProviderRegistry;
-use crate::state::{effective_provider, AgentHandle, AgentProvider, AppState, SourcePr, WorkspaceStatus};
+use crate::state::{effective_provider, AgentHandle, AgentProvider, AppState, SourcePr, WorkspacePhase, WorkspaceStatus};
 use std::io::BufRead;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -10,7 +10,7 @@ use super::agent_backend::{
     build_mcp_server_map, claude_extract_usage, codex_extract_usage, codex_unregister_mcp_servers,
     get_backend, ParsedEvent, SessionContext,
 };
-use super::helpers::{detect_default_branch, get_shell_env, inject_shell_env, strip_ansi};
+use super::helpers::{detect_default_branch, get_shell_env, inject_shell_env, slugify_title, strip_ansi};
 
 // ── Available models ─────────────────────────────────────────────────
 
@@ -191,6 +191,9 @@ pub fn send_message(
         session_id,
         source_pr,
         caveman_ultra,
+        openspec_enabled,
+        ws_phase,
+        ws_task_title,
     ) = {
         let st = state.lock().map_err(|e| e.to_string())?;
         if st.agents.contains_key(&workspace_id) {
@@ -207,6 +210,7 @@ pub fn send_message(
         let user_sp = settings.system_prompt.clone();
         let mcp_servers = settings.mcp_servers.clone();
         let cv_ultra = settings.caveman_ultra;
+        let os_enabled = settings.openspec_enabled;
         let prov = effective_provider(ws, settings);
         let ctx_dir = st.context_dir(&ws.repo_id);
         let sid = st.session_ids.get(&workspace_id).cloned();
@@ -225,6 +229,9 @@ pub fn send_message(
             sid,
             ws.source_pr.clone(),
             cv_ultra,
+            os_enabled,
+            ws.phase,
+            ws.task_title.clone(),
         )
     };
 
@@ -287,7 +294,18 @@ pub fn send_message(
     };
 
     let images_dir = data_dir.join("images");
-    let cli_prompt = if caveman_ultra {
+    let cli_prompt = if openspec_enabled && ws_phase == WorkspacePhase::Spec {
+        let slug_source = ws_task_title.as_deref().unwrap_or(&ws_branch);
+        let slug = slugify_title(slug_source);
+        if slug.is_empty() {
+            format!("/opsx:propose\n\n{}", prompt)
+        } else {
+            format!(
+                "/opsx:propose\n\nUse proposal name: {}\n\n{}",
+                slug, prompt
+            )
+        }
+    } else if caveman_ultra {
         format!("/caveman ultra\n\n{}", prompt)
     } else {
         prompt

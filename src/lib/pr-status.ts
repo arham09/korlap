@@ -69,7 +69,9 @@ export async function refreshPrStatus(wsId: string, prStatusMap: SvelteMap<strin
       prev.additions === pr.additions &&
       prev.deletions === pr.deletions &&
       prev.title === pr.title &&
-      prev.ahead_by === pr.ahead_by
+      prev.ahead_by === pr.ahead_by &&
+      prev.has_upstream === pr.has_upstream &&
+      prev.has_uncommitted === pr.has_uncommitted
     ) {
       return false; // No change — skip reactive update
     }

@@ -1,11 +1,11 @@
 use crate::git_provider::SharedProviderRegistry;
-use crate::state::{AppState, SourcePr, WorkspaceInfo, WorkspaceStatus};
+use crate::state::{AppState, SourcePr, WorkspaceInfo, WorkspacePhase, WorkspaceStatus};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
-use super::helpers::{detect_default_branch, inject_shell_env, now_unix};
+use super::helpers::{derive_branch_from_title, detect_default_branch, impl_branch_from, inject_shell_env, now_unix};
 
 // ── Random workspace names ───────────────────────────────────────────
 
@@ -50,6 +50,7 @@ pub async fn create_workspace(
     task_description: Option<String>,
     source_todo_id: Option<String>,
     custom_branch: Option<String>,
+    phase: Option<WorkspacePhase>,
     state: State<'_, Arc<Mutex<AppState>>>,
     providers: State<'_, SharedProviderRegistry>,
 ) -> Result<WorkspaceInfo, String> {
@@ -126,14 +127,44 @@ pub async fn create_workspace(
         st.worktree_dir()
     };
 
-    // When a custom branch is provided, use it directly; otherwise generate a random one.
-    let (dir_name, branch, display_name) = if let Some(ref cb) = custom_branch {
+    // Resolve branch name. Priority:
+    //   1. user-typed custom branch (errors if it already exists)
+    //   2. derived from card title as <prefix>/<kebab-slug> with -2,-3,… on collision
+    //   3. random `korlap/<adj>-<noun>` (also the fallback if (2) hits 10 collisions)
+    //
+    // `is_custom` flags branches that already have a meaningful name so the agent
+    // skips its first-message rename prompt (see agent.rs `if !is_custom_branch`).
+    let pick_random_branch = || -> Result<(String, String), String> {
+        let mut name = random_workspace_name();
+        for attempt in 0..10 {
+            let branch = format!("korlap/{}", name);
+            let check = std::process::Command::new("git")
+                .args(["rev-parse", "--verify", &branch])
+                .current_dir(&repo_path)
+                .output()
+                .map_err(|e| format!("Failed to run git: {}", e))?;
+            let folder_exists = worktree_base.join(&name).exists();
+            if !check.status.success() && !folder_exists {
+                return Ok((name, branch));
+            }
+            if attempt == 9 {
+                return Err("Could not generate a unique workspace name after 10 attempts".into());
+            }
+            name = format!(
+                "{}-{}",
+                random_workspace_name(),
+                &Uuid::new_v4().to_string()[..4]
+            );
+        }
+        unreachable!()
+    };
+
+    let (dir_name, branch, display_name, is_custom) = if let Some(ref cb) = custom_branch {
         let cb = cb.trim().to_string();
         if cb.is_empty() {
             return Err("Branch name cannot be empty".into());
         }
 
-        // Check if branch already exists
         let check = std::process::Command::new("git")
             .args(["rev-parse", "--verify", &cb])
             .current_dir(&repo_path)
@@ -143,37 +174,41 @@ pub async fn create_workspace(
             return Err(format!("Branch '{}' already exists", cb));
         }
 
-        // Use a random dir name to avoid filesystem issues with slashes in branch names
+        // Random dir name avoids filesystem issues with slashes in branch names.
         let dir = random_workspace_name();
-        (dir, cb.clone(), cb)
-    } else {
-        let mut name = random_workspace_name();
+        (dir, cb.clone(), cb, true)
+    } else if let Some((prefix, slug)) = task_title.as_deref().and_then(derive_branch_from_title) {
+        let mut chosen: Option<(String, String)> = None;
         for attempt in 0..10 {
-            let branch = format!("korlap/{}", name);
+            let suffixed_slug = if attempt == 0 {
+                slug.clone()
+            } else {
+                format!("{}-{}", slug, attempt + 1)
+            };
+            let candidate_branch = format!("{}/{}", prefix, suffixed_slug);
             let check = std::process::Command::new("git")
-                .args(["rev-parse", "--verify", &branch])
+                .args(["rev-parse", "--verify", &candidate_branch])
                 .current_dir(&repo_path)
                 .output()
                 .map_err(|e| format!("Failed to run git: {}", e))?;
-
-            let folder_exists = worktree_base.join(&name).exists();
-
+            let folder_exists = worktree_base.join(&suffixed_slug).exists();
             if !check.status.success() && !folder_exists {
+                chosen = Some((suffixed_slug, candidate_branch));
                 break;
             }
-
-            if attempt == 9 {
-                return Err("Could not generate a unique workspace name after 10 attempts".into());
-            }
-
-            name = format!(
-                "{}-{}",
-                random_workspace_name(),
-                &Uuid::new_v4().to_string()[..4]
-            );
         }
-        let branch = format!("korlap/{}", name);
-        (name.clone(), branch, name)
+        match chosen {
+            Some((dir, br)) => (dir, br.clone(), br, true),
+            None => {
+                let (dir, br) = pick_random_branch()?;
+                let display = dir.clone();
+                (dir, br, display, false)
+            }
+        }
+    } else {
+        let (dir, br) = pick_random_branch()?;
+        let display = dir.clone();
+        (dir, br, display, false)
     };
 
     let id = Uuid::new_v4().to_string();
@@ -209,20 +244,23 @@ pub async fn create_workspace(
         task_title,
         task_description,
         source_todo_id,
-        custom_branch: custom_branch.is_some(),
+        custom_branch: is_custom,
         provider_override: None,
         source_pr: None,
         source_prs: None,
         base_branch: None,
+        phase: phase.unwrap_or_default(),
+        archived: false,
     };
 
     // Check if there's a setup script to run
-    let setup_script = {
+    let (setup_script, openspec_enabled) = {
         let st = state.lock().map_err(|e| e.to_string())?;
-        st.repo_settings
-            .get(&repo_id)
-            .map(|s| s.setup_script.clone())
-            .unwrap_or_default()
+        let s = st.repo_settings.get(&repo_id);
+        (
+            s.map(|s| s.setup_script.clone()).unwrap_or_default(),
+            s.map(|s| s.openspec_enabled).unwrap_or_default(),
+        )
     };
 
     if !setup_script.trim().is_empty() {
@@ -243,6 +281,27 @@ pub async fn create_workspace(
             let stderr = String::from_utf8_lossy(&output.stderr);
             tracing::warn!("Setup script failed: {}", stderr.trim());
             // Don't fail workspace creation — just log the warning
+        }
+    }
+
+    // Initialize OpenSpec in the worktree if enabled and not already present.
+    // Non-fatal: a failure here only logs a warning.
+    if openspec_enabled && ws.phase == WorkspacePhase::Spec && !worktree_path.join("openspec").exists() {
+        tracing::info!("Running openspec init for workspace {}", ws.name);
+        let mut init_cmd = std::process::Command::new("openspec");
+        init_cmd.arg("init").current_dir(&worktree_path);
+        inject_shell_env(&mut init_cmd);
+        match init_cmd.output() {
+            Ok(out) if out.status.success() => {
+                tracing::info!("openspec init succeeded for {}", ws.name);
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                tracing::warn!("openspec init failed: {}", stderr.trim());
+            }
+            Err(e) => {
+                tracing::warn!("Could not spawn openspec (is it installed?): {}", e);
+            }
         }
     }
 
@@ -381,6 +440,8 @@ pub async fn create_workspace_from_pr(
         }),
         source_prs: None,
         base_branch: Some(pr_base_branch),
+        phase: WorkspacePhase::default(),
+        archived: false,
     };
 
     // Run setup script if configured
@@ -817,6 +878,8 @@ pub async fn create_combo_workspace(
         source_pr: None,
         source_prs: Some(source_prs),
         base_branch: Some(base_branch.clone()),
+        phase: WorkspacePhase::default(),
+        archived: false,
     };
 
     // Run setup script if configured
@@ -857,38 +920,43 @@ pub async fn create_combo_workspace(
     Ok(ws)
 }
 
-#[tauri::command]
-pub async fn remove_workspace(
-    workspace_id: String,
-    state: State<'_, Arc<Mutex<AppState>>>,
-    lsp_manager: State<'_, Arc<Mutex<crate::lsp::server::LspServerPool>>>,
+/// Tear down the on-disk artifacts for a workspace: kill the agent process, kill
+/// the workspace's terminals, drop it from LSP, run the optional `remove_script`,
+/// and run `git worktree remove --force` (with a `prune` fallback). The workspace
+/// entry in `state.workspaces` and its data files are left alone — callers
+/// decide whether to also delete or merely archive.
+fn cleanup_workspace_disk(
+    workspace_id: &str,
+    state: &Arc<Mutex<AppState>>,
+    lsp_manager: &Arc<Mutex<crate::lsp::server::LspServerPool>>,
 ) -> Result<(), String> {
     let (worktree_path, repo_path, ws_name, repo_id) = {
         let mut st = state.lock().map_err(|e| e.to_string())?;
 
-        // Kill agent if running
-        if let Some(mut handle) = st.agents.remove(&workspace_id) {
+        if let Some(mut handle) = st.agents.remove(workspace_id) {
             let _ = handle.child.kill();
             let _ = handle.child.wait();
         }
 
-        // Kill all terminals for this workspace
-        super::terminal::kill_workspace_terminals(&mut st.terminals, &workspace_id);
+        super::terminal::kill_workspace_terminals(&mut st.terminals, workspace_id);
 
         let ws = st
             .workspaces
-            .get(&workspace_id)
+            .get(workspace_id)
             .ok_or("Workspace not found")?;
         let repo = st.repos.get(&ws.repo_id).ok_or("Repo not found")?;
-        (ws.worktree_path.clone(), repo.path.clone(), ws.name.clone(), ws.repo_id.clone())
+        (
+            ws.worktree_path.clone(),
+            repo.path.clone(),
+            ws.name.clone(),
+            ws.repo_id.clone(),
+        )
     };
 
-    // Remove worktree from LSP servers (shuts down server if no folders remain)
     if let Ok(mut mgr) = lsp_manager.lock() {
         mgr.remove_worktree(&repo_id, &worktree_path);
     }
 
-    // Run remove script if configured
     {
         let st = state.lock().map_err(|e| e.to_string())?;
         if let Some(settings) = st.repo_settings.get(&repo_id) {
@@ -898,7 +966,10 @@ pub async fn remove_workspace(
                 remove_cmd.args(["-c", &settings.remove_script]);
                 remove_cmd.current_dir(&worktree_path);
                 remove_cmd.env("KORLAP_WORKSPACE_NAME", &ws_name);
-                remove_cmd.env("KORLAP_WORKSPACE_PATH", &worktree_path.to_string_lossy().to_string());
+                remove_cmd.env(
+                    "KORLAP_WORKSPACE_PATH",
+                    &worktree_path.to_string_lossy().to_string(),
+                );
                 remove_cmd.env("KORLAP_ROOT_PATH", repo_path.to_string_lossy().to_string());
                 inject_shell_env(&mut remove_cmd);
                 let _ = remove_cmd.output();
@@ -906,7 +977,6 @@ pub async fn remove_workspace(
         }
     }
 
-    // Only try to remove if the worktree path still exists
     if worktree_path.exists() {
         let output = std::process::Command::new("git")
             .args(["worktree", "remove", "--force"])
@@ -916,21 +986,29 @@ pub async fn remove_workspace(
             .map_err(|e| format!("Failed to remove worktree: {}", e))?;
 
         if !output.status.success() {
-            // Try git worktree prune as fallback (cleans stale entries)
             let _ = std::process::Command::new("git")
                 .args(["worktree", "prune"])
                 .current_dir(&repo_path)
                 .output();
         }
     } else {
-        // Worktree already gone — prune stale git references
         let _ = std::process::Command::new("git")
             .args(["worktree", "prune"])
             .current_dir(&repo_path)
             .output();
     }
 
-    // Fully delete workspace: data files, session, and entry
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remove_workspace(
+    workspace_id: String,
+    state: State<'_, Arc<Mutex<AppState>>>,
+    lsp_manager: State<'_, Arc<Mutex<crate::lsp::server::LspServerPool>>>,
+) -> Result<(), String> {
+    cleanup_workspace_disk(&workspace_id, state.inner(), lsp_manager.inner())?;
+
     let mut st = state.lock().map_err(|e| e.to_string())?;
     st.delete_workspace_data(&workspace_id);
     st.workspaces.remove(&workspace_id);
@@ -938,6 +1016,38 @@ pub async fn remove_workspace(
 
     tracing::info!("Removed workspace {}", workspace_id);
     Ok(())
+}
+
+/// Like `remove_workspace`, but keep the entry in state and on disk (messages,
+/// metadata). The card stays visible in the Done column as a historical record;
+/// the worktree directory and agent process are gone.
+#[tauri::command]
+pub async fn archive_workspace(
+    workspace_id: String,
+    state: State<'_, Arc<Mutex<AppState>>>,
+    lsp_manager: State<'_, Arc<Mutex<crate::lsp::server::LspServerPool>>>,
+    app: AppHandle,
+) -> Result<WorkspaceInfo, String> {
+    cleanup_workspace_disk(&workspace_id, state.inner(), lsp_manager.inner())?;
+
+    let snapshot = {
+        let mut st = state.lock().map_err(|e| e.to_string())?;
+        let ws = st
+            .workspaces
+            .get_mut(&workspace_id)
+            .ok_or("Workspace not found")?;
+        ws.archived = true;
+        let snap = ws.clone();
+        st.save_workspaces()?;
+        snap
+    };
+
+    let _ = app.emit("workspace-updated", snapshot.clone());
+    tracing::info!(
+        "Archived workspace {} (worktree removed, entry retained)",
+        workspace_id
+    );
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -955,6 +1065,136 @@ pub fn list_workspaces(
 }
 
 // ── Branch commands ──────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn set_workspace_phase(
+    workspace_id: String,
+    phase: WorkspacePhase,
+    state: State<'_, Arc<Mutex<AppState>>>,
+    app: AppHandle,
+) -> Result<WorkspaceInfo, String> {
+    let ws_clone = {
+        let mut st = state.lock().map_err(|e| e.to_string())?;
+        let ws = st
+            .workspaces
+            .get_mut(&workspace_id)
+            .ok_or("Workspace not found")?;
+        ws.phase = phase;
+        let snapshot = ws.clone();
+        st.save_workspaces()?;
+        snapshot
+    };
+
+    let _ = app.emit("workspace-updated", ws_clone.clone());
+    tracing::info!("Set workspace {} phase to {:?}", workspace_id, phase);
+    Ok(ws_clone)
+}
+
+/// Advance a workspace from Spec → Implementing. When the repo has OpenSpec
+/// enabled, this also branches off the current proposal branch into a fresh
+/// `impl/<slug>` branch and switches the worktree onto it, so the proposal
+/// and the implementation live on separate branches. With OpenSpec disabled
+/// this is just a phase flip on the same branch.
+#[tauri::command]
+pub fn advance_to_implementation(
+    workspace_id: String,
+    state: State<'_, Arc<Mutex<AppState>>>,
+    app: AppHandle,
+) -> Result<WorkspaceInfo, String> {
+    // 1) Snapshot what we need under the lock, then drop it before any git work.
+    let (worktree_path, current_branch, current_phase, repo_id) = {
+        let st = state.lock().map_err(|e| e.to_string())?;
+        let ws = st
+            .workspaces
+            .get(&workspace_id)
+            .ok_or("Workspace not found")?;
+        (
+            ws.worktree_path.clone(),
+            ws.branch.clone(),
+            ws.phase,
+            ws.repo_id.clone(),
+        )
+    };
+
+    let openspec_enabled = {
+        let st = state.lock().map_err(|e| e.to_string())?;
+        st.repo_settings
+            .get(&repo_id)
+            .map(|s| s.openspec_enabled)
+            .unwrap_or_default()
+    };
+
+    // 2) If conditions are right, create the impl branch and switch the worktree.
+    let new_branch: Option<String> = if openspec_enabled && current_phase == WorkspacePhase::Spec {
+        let base = impl_branch_from(&current_branch);
+        let mut chosen: Option<String> = None;
+        for attempt in 0..10 {
+            let candidate = if attempt == 0 {
+                base.clone()
+            } else {
+                format!("{}-{}", base, attempt + 1)
+            };
+
+            let output = std::process::Command::new("git")
+                .args(["checkout", "-b", &candidate])
+                .current_dir(&worktree_path)
+                .output()
+                .map_err(|e| format!("Failed to run git checkout: {}", e))?;
+
+            if output.status.success() {
+                chosen = Some(candidate);
+                break;
+            }
+
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            // "already exists" is the only retry-able failure; everything else
+            // (uncommitted-conflict, permissions, etc.) bubbles up.
+            if !stderr.to_lowercase().contains("already exists") {
+                return Err(format!("git checkout -b failed: {}", stderr.trim()));
+            }
+        }
+        Some(chosen.ok_or_else(|| {
+            format!(
+                "Could not create a unique impl branch after 10 attempts (base: {})",
+                base
+            )
+        })?)
+    } else {
+        None
+    };
+
+    // 3) Re-lock, mutate phase + branch, persist, emit.
+    let ws_clone = {
+        let mut st = state.lock().map_err(|e| e.to_string())?;
+        let ws = st
+            .workspaces
+            .get_mut(&workspace_id)
+            .ok_or("Workspace not found")?;
+        ws.phase = WorkspacePhase::Implementing;
+        if let Some(ref nb) = new_branch {
+            ws.branch = nb.clone();
+            ws.name = nb.clone();
+        }
+        let snapshot = ws.clone();
+        st.save_workspaces()?;
+        snapshot
+    };
+
+    let _ = app.emit("workspace-updated", ws_clone.clone());
+    if let Some(ref nb) = new_branch {
+        tracing::info!(
+            "Advanced workspace {} to implementing on impl branch {}",
+            workspace_id,
+            nb
+        );
+    } else {
+        tracing::info!(
+            "Advanced workspace {} to implementing (openspec off, branch unchanged)",
+            workspace_id
+        );
+    }
+    Ok(ws_clone)
+}
 
 #[tauri::command]
 pub fn rename_branch(

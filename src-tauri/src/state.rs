@@ -11,6 +11,15 @@ pub enum WorkspaceStatus {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
+pub enum WorkspacePhase {
+    #[serde(alias = "design")]
+    Spec,
+    #[default]
+    Implementing,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum AgentProvider {
     #[default]
     Claude,
@@ -61,6 +70,12 @@ pub struct WorkspaceInfo {
     pub source_prs: Option<Vec<SourcePr>>,
     #[serde(default)]
     pub base_branch: Option<String>,
+    #[serde(default)]
+    pub phase: WorkspacePhase,
+    /// Set to true after the worktree has been auto-deleted (on PR merge) while
+    /// the workspace entry is kept for history in the Done column.
+    #[serde(default)]
+    pub archived: bool,
 }
 
 pub fn effective_provider(ws: &WorkspaceInfo, settings: &RepoSettings) -> AgentProvider {
@@ -100,6 +115,10 @@ pub struct RepoSettings {
     pub default_plan: bool,
     #[serde(default)]
     pub caveman_ultra: bool,
+    #[serde(default)]
+    pub openspec_enabled: bool,
+    #[serde(default)]
+    pub default_start_phase: WorkspacePhase,
     #[serde(default)]
     pub system_prompt: String,
     /// User-configured LSP servers. Merged with built-in defaults at runtime.

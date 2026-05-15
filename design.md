@@ -91,7 +91,7 @@ Two top-level modes toggled via title bar (⌘1 / ⌘2):
 ```
 
 Sidebar: workspace list with status dots (pulsing amber = running, olive = waiting).
-Work mode tabs: Chat, Diff, Files, Terminal, Run. Actions: Review, Push & create PR.
+Work mode tabs: Chat, Diff, Files, Terminal, Run. Actions: Review, Push, Create PR.
 
 ---
 

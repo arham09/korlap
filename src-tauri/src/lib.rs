@@ -88,8 +88,11 @@ pub fn run() {
             commands::workspace::create_workspace_from_pr,
             commands::workspace::create_combo_workspace,
             commands::workspace::remove_workspace,
+            commands::workspace::archive_workspace,
             commands::workspace::list_workspaces,
             commands::workspace::rename_branch,
+            commands::workspace::set_workspace_phase,
+            commands::workspace::advance_to_implementation,
             // files
             commands::files::list_directory,
             commands::files::read_file,

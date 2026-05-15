@@ -19,6 +19,8 @@ export interface RepoDetail {
 
 export type AgentProvider = "claude" | "codex";
 
+export type WorkspacePhase = "spec" | "implementing";
+
 export interface WorkspaceInfo {
   id: string;
   name: string;
@@ -36,6 +38,8 @@ export interface WorkspaceInfo {
   source_pr?: SourcePr | null;
   source_prs?: SourcePr[] | null;
   base_branch?: string | null;
+  phase?: WorkspacePhase;
+  archived?: boolean;
 }
 
 export interface SourcePr {
@@ -209,6 +213,7 @@ export async function createWorkspace(
   taskDescription?: string,
   sourceTodoId?: string,
   customBranch?: string,
+  phase?: WorkspacePhase,
 ): Promise<WorkspaceInfo> {
   return invoke<WorkspaceInfo>("create_workspace", {
     repoId,
@@ -216,11 +221,27 @@ export async function createWorkspace(
     taskDescription: taskDescription ?? null,
     sourceTodoId: sourceTodoId ?? null,
     customBranch: customBranch ?? null,
+    phase: phase ?? null,
   });
+}
+
+export async function setWorkspacePhase(
+  workspaceId: string,
+  phase: WorkspacePhase,
+): Promise<WorkspaceInfo> {
+  return invoke<WorkspaceInfo>("set_workspace_phase", { workspaceId, phase });
+}
+
+export async function advanceToImplementation(workspaceId: string): Promise<WorkspaceInfo> {
+  return invoke<WorkspaceInfo>("advance_to_implementation", { workspaceId });
 }
 
 export async function removeWorkspace(workspaceId: string): Promise<void> {
   return invoke("remove_workspace", { workspaceId });
+}
+
+export async function archiveWorkspace(workspaceId: string): Promise<WorkspaceInfo> {
+  return invoke<WorkspaceInfo>("archive_workspace", { workspaceId });
 }
 
 export async function listWorkspaces(
@@ -643,6 +664,8 @@ export interface PrStatus {
   additions: number;
   deletions: number;
   ahead_by: number;
+  has_upstream: boolean;
+  has_uncommitted: boolean;
 }
 
 export async function getPrStatus(workspaceId: string): Promise<PrStatus> {
@@ -720,6 +743,8 @@ export interface RepoSettings {
   default_thinking: boolean;
   default_plan: boolean;
   caveman_ultra: boolean;
+  openspec_enabled: boolean;
+  default_start_phase: WorkspacePhase;
   system_prompt: string;
   lsp_servers: Record<string, LspServerConfig>;
   mcp_servers: Record<string, McpServerConfig>;
