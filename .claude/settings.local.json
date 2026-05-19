@@ -11,7 +11,9 @@
       "Bash(openspec --help)",
       "Bash(openspec change *)",
       "Bash(openspec instructions *)",
-      "Bash(grep -n 'design\\\\s*=\\\\|\\\\bdesign:\\\\|design:\\\\s*$derived\\\\|let design\\\\|const design\\\\|phase\\\\s*===\\\\|phase.*Design\\\\|isDesign\\\\|filterDesign' src/routes/+page.svelte)"
+      "Bash(grep -n 'design\\\\s*=\\\\|\\\\bdesign:\\\\|design:\\\\s*$derived\\\\|let design\\\\|const design\\\\|phase\\\\s*===\\\\|phase.*Design\\\\|isDesign\\\\|filterDesign' src/routes/+page.svelte)",
+      "Bash(rtk ls *)",
+      "Bash(rtk grep *)"
     ]
   }
 }
