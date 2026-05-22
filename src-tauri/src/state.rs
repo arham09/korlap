@@ -222,8 +222,8 @@ pub struct ContextMeta {
 ///     repos.json
 ///     workspaces.json
 ///     sessions.json
-///     workspaces/<workspace-id>/   ← git worktree
 ///     messages/<workspace-id>.json
+///   <worktree_base>/<workspace-id>/   ← git worktree (default: ~/Documents/korlap/workspaces/)
 pub struct AppState {
     pub repos: HashMap<String, RepoInfo>,
     pub workspaces: HashMap<String, WorkspaceInfo>,
@@ -231,6 +231,7 @@ pub struct AppState {
     pub session_ids: HashMap<String, String>,
     pub repo_settings: HashMap<String, RepoSettings>,
     pub data_dir: PathBuf,
+    pub worktree_base: PathBuf,
     pub mcp_api_port: u16,
     pub terminals: HashMap<String, TerminalHandle>,
     pub context_meta: HashMap<String, ContextMeta>,
@@ -378,7 +379,7 @@ impl AppState {
 
     /// Path where worktrees are created
     pub fn worktree_dir(&self) -> PathBuf {
-        self.data_dir.join("workspaces")
+        self.worktree_base.clone()
     }
 
     /// Path where messages are stored

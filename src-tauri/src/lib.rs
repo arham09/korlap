@@ -33,6 +33,22 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)
                 .map_err(|e| format!("Failed to create app data dir: {}", e))?;
 
+            // Worktrees live under ~/Documents/korlap/workspaces/ so they're easy to
+            // browse in Finder and open in editors. Fall back to data_dir if the OS
+            // can't resolve a Documents dir.
+            let worktree_base = match app.path().document_dir() {
+                Ok(documents_dir) => documents_dir.join("korlap").join("workspaces"),
+                Err(e) => {
+                    tracing::warn!(
+                        "Could not resolve Documents dir ({}), falling back to app data dir for worktrees",
+                        e
+                    );
+                    data_dir.join("workspaces")
+                }
+            };
+            std::fs::create_dir_all(&worktree_base)
+                .map_err(|e| format!("Failed to create worktree base dir: {}", e))?;
+
             let mut app_state = AppState {
                 repos: HashMap::new(),
                 workspaces: HashMap::new(),
@@ -40,6 +56,7 @@ pub fn run() {
                 session_ids: HashMap::new(),
                 repo_settings: HashMap::new(),
                 data_dir,
+                worktree_base,
                 mcp_api_port: 0,
                 terminals: HashMap::new(),
                 context_meta: HashMap::new(),
