@@ -744,6 +744,7 @@ export interface RepoSettings {
   default_plan: boolean;
   caveman_ultra: boolean;
   openspec_enabled: boolean;
+  ask_user_question_enabled: boolean;
   default_start_phase: WorkspacePhase;
   system_prompt: string;
   lsp_servers: Record<string, LspServerConfig>;
@@ -907,6 +908,41 @@ export function onTodosChanged(
   callback: (event: { repo_id: string }) => void,
 ): Promise<UnlistenFn> {
   return listen<{ repo_id: string }>("todos-changed", (e) => callback(e.payload));
+}
+
+// ── MCP User Question ───────────────────────────────────────────────
+
+export interface McpQuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface McpQuestion {
+  question: string;
+  header: string;
+  multiSelect?: boolean;
+  options: McpQuestionOption[];
+}
+
+export interface QuestionRequestedEvent {
+  workspace_id: string;
+  request_id: string;
+  questions: McpQuestion[];
+}
+
+export function onQuestionRequested(
+  callback: (event: QuestionRequestedEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<QuestionRequestedEvent>("question-requested", (e) =>
+    callback(e.payload),
+  );
+}
+
+export async function submitQuestionAnswer(
+  requestId: string,
+  answer: string,
+): Promise<void> {
+  return invoke("submit_question_answer", { requestId, answer });
 }
 
 // ── Suggested replies ────────────────────────────────────────────────

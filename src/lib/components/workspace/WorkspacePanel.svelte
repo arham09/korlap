@@ -1,6 +1,6 @@
 <script lang="ts">
   import { SvelteMap } from "svelte/reactivity";
-  import type { WorkspaceInfo, RepoSettings, PrStatus, ScriptEvent, NamedScript, ProviderInfo } from "$lib/ipc";
+  import type { WorkspaceInfo, RepoSettings, PrStatus, ScriptEvent, NamedScript, ProviderInfo, QuestionRequestedEvent } from "$lib/ipc";
   import { runScript, stopScript, closeTerminal } from "$lib/ipc";
   import type { ReviewState } from "./ReviewPill.svelte";
   import type { ChatPanelApi, QueueDisplayItem, PastedImage } from "$lib/chat-utils";
@@ -31,6 +31,8 @@
     modelByWorkspace: SvelteMap<string, string>;
     reviewByWorkspace: SvelteMap<string, ReviewState>;
     agentTaskByWorkspace: SvelteMap<string, string>;
+    pendingQuestions: SvelteMap<string, QuestionRequestedEvent>;
+    onQuestionAnswer: (wsId: string, requestId: string, answer: string) => Promise<void>;
     repoSettings: RepoSettings | null;
     diffRefreshTrigger: number;
     prStatus: PrStatus | undefined;
@@ -87,6 +89,8 @@
     modelByWorkspace,
     reviewByWorkspace,
     agentTaskByWorkspace,
+    pendingQuestions,
+    onQuestionAnswer,
     repoSettings,
     diffRefreshTrigger,
     prStatus,
@@ -791,6 +795,8 @@
                 queue={getQueueItems(ws.id)}
                 {contextWarning}
                 providerInfo={providerInfoByWorkspace.get(ws.id) ?? null}
+                pendingQuestion={pendingQuestions.get(ws.id) ?? null}
+                onQuestionAnswer={(requestId, answer) => onQuestionAnswer(ws.id, requestId, answer)}
                 onSend={(prompt, images, mentions, planMode) => onSend(prompt, images, mentions, planMode)}
                 onSendImmediate={(prompt) => onSendImmediate(prompt)}
                 {onStop}
@@ -818,6 +824,8 @@
               queue={getQueueItems(ws.id)}
               {contextWarning}
               providerInfo={providerInfoByWorkspace.get(ws.id) ?? null}
+              pendingQuestion={pendingQuestions.get(ws.id) ?? null}
+              onQuestionAnswer={(requestId, answer) => onQuestionAnswer(ws.id, requestId, answer)}
               onSend={(prompt, images, mentions, planMode) => onSend(prompt, images, mentions, planMode)}
               onSendImmediate={(prompt) => onSendImmediate(prompt)}
               {onStop}

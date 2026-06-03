@@ -22,7 +22,7 @@ pub struct SessionContext {
     /// Provider-agnostic auth env vars (e.g. GH_TOKEN, GIT_CONFIG_PARAMETERS).
     /// Built by the git service provider so agent processes authenticate correctly.
     pub git_auth_env: Vec<(String, String)>,
-    pub disallowed_tools: &'static str,
+    pub disallowed_tools: String,
 }
 
 /// Provider-agnostic parsed event from a single NDJSON line.
@@ -102,7 +102,12 @@ pub fn build_mcp_server_map(
                 "env": {
                     "KORLAP_API_PORT": mcp_api_port.to_string(),
                     "KORLAP_WORKSPACE_ID": workspace_id
-                }
+                },
+                // Per-server override of claude-code's MCP tool-call timeout (ms).
+                // ask_user_question intentionally holds the HTTP response open for
+                // up to 10 minutes waiting for the user to click; must match the
+                // recv_timeout in mcp_api.rs::handle_ask_user_question.
+                "timeout": 600000
             }),
         );
     }
@@ -162,8 +167,12 @@ struct ClaudeBackend;
 /// Tools blocked to prevent agent from escaping Korlap worktree isolation.
 /// EnterWorktree creates worktrees from origin/<default> of the MAIN repo,
 /// completely bypassing workspace isolation. LSP is disabled because Korlap
-/// manages shared LSP servers centrally.
-pub const DISALLOWED_WORKTREE_TOOLS: &str = "EnterWorktree,ExitWorktree,LSP";
+/// manages shared LSP servers centrally. AskUserQuestion is disabled because
+/// `claude -p` headless mode cannot wait for an interactive user — the tool
+/// renders a phantom option card in the chat that the user cannot answer in
+/// time, so we block the model from calling it (it will ask via chat text
+/// instead, which is fully interactive).
+pub const DISALLOWED_WORKTREE_TOOLS: &str = "EnterWorktree,ExitWorktree,LSP,AskUserQuestion";
 
 impl AgentBackend for ClaudeBackend {
     fn build_session_command(
@@ -190,7 +199,7 @@ impl AgentBackend for ClaudeBackend {
             ]);
         } else {
             cmd.args(["--permission-mode", "bypassPermissions"]);
-            cmd.args(["--disallowedTools", ctx.disallowed_tools]);
+            cmd.args(["--disallowedTools", ctx.disallowed_tools.as_str()]);
         }
 
         // Grant agent access to images directory
@@ -231,6 +240,13 @@ impl AgentBackend for ClaudeBackend {
         cmd.stderr(std::process::Stdio::piped());
 
         inject_shell_env(&mut cmd);
+
+        // Extend claude-code's per-tool MCP timeout to 10 minutes so the
+        // korlap ask_user_question tool can wait for a human click without
+        // being aborted client-side. The per-server `timeout` field in the
+        // MCP config also sets this, but the env var is a defense-in-depth
+        // fallback for claude-code versions that don't honor the field.
+        cmd.env("MCP_TOOL_TIMEOUT", "600000");
 
         for (key, value) in &ctx.git_auth_env {
             cmd.env(key, value);

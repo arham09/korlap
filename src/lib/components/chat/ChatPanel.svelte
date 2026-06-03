@@ -1,6 +1,6 @@
 <script lang="ts">
   import { messagesByWorkspace, sendingByWorkspace, tokensByWorkspace, type Message } from "$lib/stores/messages.svelte";
-  import { searchWorkspaceFiles, suggestReplies, getCachedModels, getModelLabel, type FileSearchResult, type ProviderInfo } from "$lib/ipc";
+  import { searchWorkspaceFiles, suggestReplies, getCachedModels, getModelLabel, type FileSearchResult, type ProviderInfo, type QuestionRequestedEvent } from "$lib/ipc";
   import { Lightbulb, BookOpen, Play, ArrowUp, Square, Loader2, Timer, Settings, Pencil, ChevronDown, RefreshCw } from "lucide-svelte";
   import { renderMarkdown, renderUserMarkdown } from "$lib/markdown";
   import { externalLinks, copyCodeBlocks, tooltip } from "$lib/actions";
@@ -8,6 +8,7 @@
   import MentionAutocomplete, { type MentionAutocompleteApi } from "./MentionAutocomplete.svelte";
   import VirtualScroller from "./VirtualScroller.svelte";
   import AskUserQuestion from "./AskUserQuestion.svelte";
+  import McpAskUserQuestion from "./McpAskUserQuestion.svelte";
   import EditDiffBlock from "./EditDiffBlock.svelte";
   import TodoListBlock from "./TodoListBlock.svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
@@ -33,6 +34,8 @@
     queue?: QueueDisplayItem[];
     contextWarning?: boolean;
     providerInfo?: ProviderInfo | null;
+    pendingQuestion?: QuestionRequestedEvent | null;
+    onQuestionAnswer?: (requestId: string, answer: string) => Promise<void>;
     onSend: (prompt: string, images: PastedImage[], mentions: Mention[], planMode: boolean) => void;
     onSendImmediate?: (prompt: string) => void;
     onStop: () => void;
@@ -47,7 +50,7 @@
     onProviderSwitch?: (provider: import("$lib/ipc").AgentProvider) => void;
   }
 
-  let { workspaceId, creating = false, planMode = false, thinkingMode = false, model = "", queue = [], contextWarning = false, providerInfo = null, onSend, onSendImmediate, onStop, onSendNow, onRemoveFromQueue, onPlanModeChange, onThinkingModeChange, onModelChange, onExecutePlan, onMentionClick, onReady, onProviderSwitch }: Props = $props();
+  let { workspaceId, creating = false, planMode = false, thinkingMode = false, model = "", queue = [], contextWarning = false, providerInfo = null, pendingQuestion = null, onQuestionAnswer, onSend, onSendImmediate, onStop, onSendNow, onRemoveFromQueue, onPlanModeChange, onThinkingModeChange, onModelChange, onExecutePlan, onMentionClick, onReady, onProviderSwitch }: Props = $props();
 
   let showProviderConfirm = $state(false);
   let pendingProvider = $state<import("$lib/ipc").AgentProvider | null>(null);
@@ -641,6 +644,16 @@
         {/if}
       {/snippet}
     </VirtualScroller>
+  {/if}
+
+  {#if pendingQuestion && onQuestionAnswer}
+    <div class="mcp-question-strip">
+      <McpAskUserQuestion
+        questions={pendingQuestion.questions}
+        requestId={pendingQuestion.request_id}
+        onAnswer={onQuestionAnswer}
+      />
+    </div>
   {/if}
 
   {#if queue.length > 0}
@@ -1404,6 +1417,18 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  /* ── MCP question strip (sticky above input while a question is pending) ────────── */
+
+  .mcp-question-strip {
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-card);
+    border-top: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
   }
 
   /* ── Queue strip ────────── */

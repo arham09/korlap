@@ -39,6 +39,7 @@
     default_plan: false,
     caveman_ultra: false,
     openspec_enabled: false,
+    ask_user_question_enabled: false,
     default_start_phase: "implementing",
     system_prompt: "",
     lsp_servers: {},
@@ -878,6 +879,18 @@
               onclick={() => { settings.openspec_enabled = !settings.openspec_enabled; scheduleAutosave(); }}
               role="switch"
               aria-checked={settings.openspec_enabled}
+            >
+              <span class="toggle-knob"></span>
+            </button>
+          </label>
+          <label class="toggle-row">
+            <span class="toggle-label" use:tooltip={{ text: "Lets the agent ask you multiple-choice questions in chat with clickable options. The agent's tool call blocks until you click an answer. Off by default." }}>Interactive questions</span>
+            <button
+              class="toggle-switch"
+              class:on={settings.ask_user_question_enabled}
+              onclick={() => { settings.ask_user_question_enabled = !settings.ask_user_question_enabled; scheduleAutosave(); }}
+              role="switch"
+              aria-checked={settings.ask_user_question_enabled}
             >
               <span class="toggle-knob"></span>
             </button>

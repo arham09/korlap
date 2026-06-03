@@ -62,6 +62,7 @@ pub fn run() {
                 context_meta: HashMap::new(),
                 context_agents: HashMap::new(),
                 script_pids: HashMap::new(),
+                pending_questions: HashMap::new(),
             };
 
             if let Err(e) = app_state.load() {
@@ -157,6 +158,7 @@ pub fn run() {
             commands::agent::switch_workspace_provider,
             commands::agent::send_message,
             commands::agent::stop_agent,
+            commands::agent::submit_question_answer,
             commands::agent::generate_commit_message,
             commands::agent::suggest_replies,
             commands::agent::prioritize_todos,

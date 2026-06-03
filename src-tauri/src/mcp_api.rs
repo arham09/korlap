@@ -85,6 +85,7 @@ fn handle_request(
         ("POST", "/rename-branch") => handle_rename_branch(&body, state, app),
         ("GET", "/workspace-info") => handle_workspace_info(&request_line, state),
         ("POST", "/notify") => handle_notify(&body, app),
+        ("POST", "/ask-user-question") => handle_ask_user_question(&body, state, app),
         // LSP routes
         ("POST", "/lsp/goto-definition") => handle_lsp_goto_definition(&body, state, lsp_mgr, app),
         ("POST", "/lsp/references") => handle_lsp_references(&body, state, lsp_mgr, app),
@@ -164,6 +165,67 @@ fn handle_rename_branch(
         "200 OK".into(),
         format!(r#"{{"ok":true,"branch":"{}","name":"{}"}}"#, new_name, new_name),
     )
+}
+
+fn handle_ask_user_question(
+    body: &[u8],
+    state: &Arc<Mutex<AppState>>,
+    app: &AppHandle,
+) -> (String, String) {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return ("400 Bad Request".into(), r#"{"error":"invalid json"}"#.into());
+    };
+
+    let workspace_id = match v.get("workspace_id").and_then(|s| s.as_str()) {
+        Some(s) => s.to_string(),
+        None => return ("400 Bad Request".into(), r#"{"error":"missing workspace_id"}"#.into()),
+    };
+
+    let questions = match v.get("questions") {
+        Some(q) => q.clone(),
+        None => return ("400 Bad Request".into(), r#"{"error":"missing questions"}"#.into()),
+    };
+
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+
+    {
+        let mut st = match state.lock() {
+            Ok(st) => st,
+            Err(e) => {
+                return (
+                    "500 Internal Server Error".into(),
+                    format!(r#"{{"error":"{}"}}"#, e),
+                )
+            }
+        };
+        st.pending_questions.insert(request_id.clone(), tx);
+    }
+
+    let _ = app.emit(
+        "question-requested",
+        serde_json::json!({
+            "workspace_id": workspace_id,
+            "request_id": request_id,
+            "questions": questions,
+        }),
+    );
+
+    match rx.recv_timeout(std::time::Duration::from_secs(600)) {
+        Ok(answer) => {
+            let body = serde_json::json!({ "answer": answer }).to_string();
+            ("200 OK".into(), body)
+        }
+        Err(_) => {
+            if let Ok(mut st) = state.lock() {
+                st.pending_questions.remove(&request_id);
+            }
+            (
+                "408 Request Timeout".into(),
+                r#"{"error":"user did not respond within 10 minutes"}"#.into(),
+            )
+        }
+    }
 }
 
 fn handle_workspace_info(
