@@ -151,6 +151,73 @@ server.tool(
   },
 );
 
+// ── User Question ───────────────────────────────────────────────────
+
+server.tool(
+  "ask_user_question",
+  "Ask the user one or more structured multiple-choice questions and wait for their answer. Korlap renders clickable option cards in the chat; this call blocks (up to 10 minutes) until the user clicks an option. Use this when you need a decision from the user (architectural choice, ambiguous requirement, scope clarification, etc.) instead of guessing. Prefer this over emitting plain-text questions when the answer is a clear pick from a small set of options.",
+  {
+    questions: z
+      .array(
+        z.object({
+          question: z
+            .string()
+            .describe("The full question text (e.g. 'Which auth strategy should we use?')"),
+          header: z
+            .string()
+            .describe("Short label/chip for the question, max ~12 chars (e.g. 'Auth method')"),
+          multiSelect: z
+            .boolean()
+            .optional()
+            .describe("If true, the user can pick multiple options. Default false."),
+          options: z
+            .array(
+              z.object({
+                label: z.string().describe("Option label shown on the button"),
+                description: z
+                  .string()
+                  .describe("One-line explanation of what this option means"),
+              }),
+            )
+            .min(2)
+            .max(4)
+            .describe("2-4 mutually-exclusive options. Put the recommended one first."),
+        }),
+      )
+      .min(1)
+      .max(4)
+      .describe("1-4 questions to ask in a single batch."),
+  },
+  async ({ questions }) => {
+    const { ok, data, status } = await apiCall("POST", "/ask-user-question", {
+      workspace_id: WORKSPACE_ID,
+      questions,
+    });
+
+    if (!ok) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `ask_user_question failed (status ${status}): ${JSON.stringify(data)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const answer = (data as { answer: string }).answer;
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `User answered: ${answer}`,
+        },
+      ],
+    };
+  },
+);
+
 // ── Todo Tools ──────────────────────────────────────────────────────
 
 server.tool(

@@ -192,6 +192,7 @@ pub fn send_message(
         source_pr,
         caveman_ultra,
         openspec_enabled,
+        ask_user_question_enabled,
         ws_phase,
         ws_task_title,
     ) = {
@@ -211,6 +212,7 @@ pub fn send_message(
         let mcp_servers = settings.mcp_servers.clone();
         let cv_ultra = settings.caveman_ultra;
         let os_enabled = settings.openspec_enabled;
+        let aq_enabled = settings.ask_user_question_enabled;
         let prov = effective_provider(ws, settings);
         let ctx_dir = st.context_dir(&ws.repo_id);
         let sid = st.session_ids.get(&workspace_id).cloned();
@@ -230,6 +232,7 @@ pub fn send_message(
             ws.source_pr.clone(),
             cv_ultra,
             os_enabled,
+            aq_enabled,
             ws.phase,
             ws.task_title.clone(),
         )
@@ -281,6 +284,7 @@ pub fn send_message(
             &prompt,
             &user_system_prompt,
             &source_pr,
+            ask_user_question_enabled,
         ))
     } else {
         None
@@ -324,7 +328,14 @@ pub fn send_message(
         workspace_id: workspace_id.clone(),
         images_dir,
         git_auth_env,
-        disallowed_tools: super::agent_backend::DISALLOWED_WORKTREE_TOOLS,
+        disallowed_tools: if ask_user_question_enabled {
+            super::agent_backend::DISALLOWED_WORKTREE_TOOLS.to_string()
+        } else {
+            format!(
+                "{},mcp__korlap__ask_user_question",
+                super::agent_backend::DISALLOWED_WORKTREE_TOOLS
+            )
+        },
     };
 
     let (mut cmd, mcp_cleanup_names) = backend.build_session_command(&ctx)?;
@@ -558,6 +569,7 @@ fn build_system_prompt(
     prompt: &str,
     user_system_prompt: &str,
     source_pr: &Option<SourcePr>,
+    ask_user_question_enabled: bool,
 ) -> String {
     let base_branch = if let Some(ref pr) = source_pr {
         pr.base_branch.clone()
@@ -667,6 +679,16 @@ fn build_system_prompt(
         system_prompt.push_str(user_system_prompt);
     }
 
+    if ask_user_question_enabled {
+        system_prompt.push_str(
+            "\n\nWhen you need a structured multiple-choice decision from the user, \
+             call mcp__korlap__ask_user_question instead of the native AskUserQuestion \
+             (which is disabled in Korlap because the headless agent can't wait for input). \
+             The MCP tool blocks until the user clicks an option in the chat UI and returns \
+             their answer.",
+        );
+    }
+
     system_prompt
 }
 
@@ -699,6 +721,25 @@ pub fn stop_agent(
 
     tracing::info!("Stopped agent for workspace {}", workspace_id);
     Ok(())
+}
+
+/// Deliver a user's selected answer to an in-flight mcp__korlap__ask_user_question call.
+/// The MCP HTTP handler in mcp_api.rs registered a channel under `request_id`
+/// and is currently blocked on `recv_timeout`. Sending here resolves that call,
+/// the tool result is returned to the agent, and streaming resumes.
+#[tauri::command]
+pub fn submit_question_answer(
+    request_id: String,
+    answer: String,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<(), String> {
+    let mut st = state.lock().map_err(|e| e.to_string())?;
+    match st.pending_questions.remove(&request_id) {
+        Some(tx) => tx
+            .send(answer)
+            .map_err(|_| "Question handler dropped before answer arrived".to_string()),
+        None => Err("Question is no longer pending (timed out or already answered)".into()),
+    }
 }
 
 // ── Warm context helpers ─────────────────────────────────────────────

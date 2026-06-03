@@ -20,6 +20,8 @@
     onAgentStatus,
     onWorkspaceUpdated,
     onTodosChanged,
+    onQuestionRequested,
+    submitQuestionAnswer,
     stopAgent,
     renameBranch,
     getRepoSettings,
@@ -65,6 +67,7 @@
     type ContextBuildStatus,
     type ProviderInfo,
     type AgentProvider,
+    type QuestionRequestedEvent,
     getWorkspaceProviderInfo,
     switchWorkspaceProvider,
   } from "$lib/ipc";
@@ -136,6 +139,9 @@
   let chatPanelApis = new SvelteMap<string, ChatPanelApi>();
   let reviewByWorkspace = new SvelteMap<string, ReviewState>();
   let agentTaskByWorkspace = new SvelteMap<string, string>();
+  // In-flight MCP user-question requests, keyed by workspace_id.
+  // At most one pending question per workspace (cleared when answered).
+  let pendingQuestions = new SvelteMap<string, QuestionRequestedEvent>();
   let providerInfoByWorkspace = new SvelteMap<string, ProviderInfo>();
   let gitOpInProgress = new SvelteMap<string, boolean>();
   let baseBehindMap = new SvelteMap<string, number>();
@@ -618,6 +624,7 @@
     let unlistenStatus: (() => void) | undefined;
     let unlistenWsUpdate: (() => void) | undefined;
     let unlistenTodos: (() => void) | undefined;
+    let unlistenQuestion: (() => void) | undefined;
 
     (async () => {
       listModels(undefined).catch(() => {}); // pre-populate model cache
@@ -660,6 +667,10 @@
             todos = (raw as TodoItem[]) ?? [];
           }).catch(() => {});
         }
+      });
+
+      unlistenQuestion = await onQuestionRequested((event) => {
+        pendingQuestions.set(event.workspace_id, event);
       });
 
       // LSP server lifecycle events → status bar + toast notifications
@@ -875,6 +886,7 @@
       unlistenStatus?.();
       unlistenWsUpdate?.();
       unlistenTodos?.();
+      unlistenQuestion?.();
       clearInterval(prPollInterval);
       clearInterval(basePollInterval);
       window.removeEventListener("keydown", handleKeydown);
@@ -2042,6 +2054,16 @@
     });
   }
 
+  /** Resolve an in-flight mcp__korlap__ask_user_question call with the user's selection. */
+  async function handleQuestionAnswer(wsId: string, requestId: string, answer: string) {
+    try {
+      await submitQuestionAnswer(requestId, answer);
+      pendingQuestions.delete(wsId);
+    } catch (e) {
+      addToast(`Could not submit answer: ${e}`, "error");
+    }
+  }
+
   /** Send immediately, bypassing the queue. Used for AskUserQuestion answers. */
   async function handleSendImmediate(prompt: string) {
     if (!selectedWsId) return;
@@ -2843,6 +2865,8 @@
             {modelByWorkspace}
             {reviewByWorkspace}
             {agentTaskByWorkspace}
+            {pendingQuestions}
+            onQuestionAnswer={handleQuestionAnswer}
             {repoSettings}
             {diffRefreshTrigger}
             prStatus={selectedWsId ? prStatusMap.get(selectedWsId) : undefined}

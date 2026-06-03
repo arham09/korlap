@@ -117,6 +117,12 @@ pub struct RepoSettings {
     pub caveman_ultra: bool,
     #[serde(default)]
     pub openspec_enabled: bool,
+    /// When true, the agent gets access to mcp__korlap__ask_user_question and is
+    /// nudged to use it instead of the native AskUserQuestion (which is blocked
+    /// either way because `claude -p` headless mode can't wait for a user).
+    /// Defaults to false so existing repos see no behavior change on upgrade.
+    #[serde(default)]
+    pub ask_user_question_enabled: bool,
     #[serde(default)]
     pub default_start_phase: WorkspacePhase,
     #[serde(default)]
@@ -238,6 +244,10 @@ pub struct AppState {
     pub context_agents: HashMap<String, AgentHandle>,
     /// PID of currently running script per workspace, for stop_script.
     pub script_pids: HashMap<String, u32>,
+    /// In-flight MCP user-question requests awaiting an answer.
+    /// Key: request_id (uuid). Value: channel sender that wakes the blocked
+    /// HTTP handler in mcp_api.rs once the user clicks an option.
+    pub pending_questions: HashMap<String, std::sync::mpsc::Sender<String>>,
 }
 
 impl AppState {
