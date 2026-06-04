@@ -55,6 +55,7 @@
     onRemoveTodo: (todoId: string) => void;
     onToggleReady: (todoId: string) => void;
     onRemoveWorkspace: (wsId: string) => void;
+    onArchiveWorkspace: (wsId: string) => void;
     onRemoveAllDone: () => void;
     onManualCheckout: (data: ManualCheckoutData) => void;
     onPrCheckout: (prNumber: number) => void;
@@ -100,6 +101,7 @@
     onRemoveTodo,
     onToggleReady,
     onRemoveWorkspace,
+    onArchiveWorkspace,
     onRemoveAllDone,
     onManualCheckout,
     onPrCheckout,
@@ -485,6 +487,7 @@
           col={1}
           onClick={(e) => { e.metaKey ? onCardClick(ws.id) : detailWs = ws; }}
           onRemove={() => onRemoveWorkspace(ws.id)}
+          onArchive={() => onArchiveWorkspace(ws.id)}
           onDragStart={handleDragStart}
           onDrop={handleDrop}
         />
@@ -508,6 +511,7 @@
         col={2}
         onClick={(e) => { e.metaKey ? onCardClick(ws.id) : detailWs = ws; }}
         onRemove={() => onRemoveWorkspace(ws.id)}
+        onArchive={() => onArchiveWorkspace(ws.id)}
         onDragStart={handleDragStart}
         onDrop={handleDrop}
       />
@@ -529,6 +533,7 @@
         col={3}
         onClick={(e) => { e.metaKey ? onCardClick(ws.id) : detailWs = ws; }}
         onRemove={() => onRemoveWorkspace(ws.id)}
+        onArchive={() => onArchiveWorkspace(ws.id)}
         onDragStart={handleDragStart}
         onDrop={handleDrop}
       />

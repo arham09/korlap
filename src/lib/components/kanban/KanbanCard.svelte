@@ -1,7 +1,7 @@
 <script lang="ts">
   import { type WorkspaceInfo, type PrStatus, getModelLabel } from "$lib/ipc";
   import { convertFileSrc } from "@tauri-apps/api/core";
-  import { Play, X, Trash2, Pencil, Lightbulb, BookOpen, CircleCheck, Circle } from "lucide-svelte";
+  import { Play, X, Trash2, Archive, Pencil, Lightbulb, BookOpen, CircleCheck, Circle } from "lucide-svelte";
   import { tooltip } from "$lib/actions";
   import { draggable, dragStore, type DragInfo } from "./dnd.svelte";
 
@@ -31,6 +31,7 @@
     onAction?: () => void;
     onEdit?: () => void;
     onRemove?: () => void;
+    onArchive?: () => void;
     onToggleReady?: () => void;
     onDragStart?: () => void;
     onDrop?: (toCol: number, toIndex: number, drag: DragInfo) => void;
@@ -58,6 +59,7 @@
     onAction,
     onEdit,
     onRemove,
+    onArchive,
     onToggleReady,
     onDragStart,
     onDrop,
@@ -166,6 +168,11 @@
       <span class="card-name" class:has-title={!!workspace.task_title}>{workspace.task_title ?? workspace.name}</span>
       {#if workspace.status === "running" && !isReviewing}
         <span class="card-elapsed">{elapsed}</span>
+      {/if}
+      {#if onArchive && !workspace.archived}
+        <button class="ws-archive-btn" onclick={(e) => { e.stopPropagation(); onArchive(); }} use:tooltip={{ text: "Archive (move to Done)" }}>
+          <Archive size={11} />
+        </button>
       {/if}
       {#if onRemove}
         <button class="ws-remove-btn" onclick={(e) => { e.stopPropagation(); onRemove(); }} use:tooltip={{ text: "Remove workspace" }}>
@@ -388,6 +395,7 @@
     background: var(--bg-hover);
   }
 
+  .ws-archive-btn,
   .ws-remove-btn {
     display: flex;
     align-items: center;
@@ -402,8 +410,14 @@
     transition: opacity 0.15s, color 0.15s, background 0.15s;
   }
 
+  .ws-card:hover .ws-archive-btn,
   .ws-card:hover .ws-remove-btn {
     opacity: 1;
+  }
+
+  .ws-archive-btn:hover {
+    color: var(--accent);
+    background: var(--bg-hover);
   }
 
   .ws-remove-btn:hover {

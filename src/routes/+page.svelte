@@ -587,11 +587,14 @@
   // Plan column is fully sticky: while a workspace is in spec phase it stays here
   // regardless of PR state (none/open/merged/closed). The only way out is the
   // manual Plan → In Progress drag, which flips phase to "implementing".
+  // Archived workspaces are pinned to Done regardless of phase or (possibly stale)
+  // PR status — see doneWs below. The other columns exclude them explicitly.
   let designWs = $derived(
-    activeWorkspaces.filter((ws) => ws.phase === "spec"),
+    activeWorkspaces.filter((ws) => ws.phase === "spec" && !ws.archived),
   );
   let inProgressWs = $derived(
     activeWorkspaces.filter((ws) => {
+      if (ws.archived) return false;
       if (ws.phase === "spec") return false;
       const pr = prStatusMap.get(ws.id);
       const noPr = !pr || pr.state === "none";
@@ -601,12 +604,14 @@
   // Review: only implementing-phase workspaces with an open PR.
   let reviewWs = $derived(
     activeWorkspaces.filter((ws) => {
+      if (ws.archived) return false;
       if (ws.phase === "spec") return false;
       return prStatusMap.get(ws.id)?.state === "open";
     }),
   );
   let doneWs = $derived(
     activeWorkspaces.filter((ws) => {
+      if (ws.archived) return true;
       if (ws.phase === "spec") return false;
       return prStatusMap.get(ws.id)?.state === "merged";
     }),
@@ -1795,6 +1800,29 @@
     }
   }
 
+  // Manual archive from any stage (Plan / In Progress / Review). Stops the agent,
+  // removes the worktree, and keeps the entry — the display logic then pins the
+  // card to Done (see doneWs). Confirmed because the agent may be running.
+  async function handleArchive(wsId: string) {
+    const ws = workspaces.find((w) => w.id === wsId);
+    if (!ws || ws.archived) return;
+    const name = ws.task_title ?? ws.name;
+    const confirmed = await confirm(
+      `Archive "${name}"? The agent will be stopped and its worktree removed. ` +
+      `The card moves to Done; messages and session record are kept.`,
+      { title: "Archive task?", kind: "warning", okLabel: "Archive", cancelLabel: "Cancel" },
+    );
+    if (!confirmed) return;
+    try {
+      const updated = await archiveWorkspace(wsId);
+      const idx = workspaces.findIndex((w) => w.id === wsId);
+      if (idx >= 0) workspaces[idx] = updated;
+      addToast(`Archived "${name}" — moved to Done`, "success");
+    } catch (e) {
+      addToast(`Could not archive "${name}": ${e}`, "error");
+    }
+  }
+
   // Fired from refreshPrStatus when a PR transitions to merged. Deletes the
   // worktree + agent process but keeps the workspace entry so the card stays
   // visible in the Done column as a record. No confirmation: the user opted in
@@ -2959,6 +2987,7 @@
             onRemoveTodo={handleRemoveTodo}
             onToggleReady={handleToggleReady}
             onRemoveWorkspace={handleRemove}
+            onArchiveWorkspace={handleArchive}
             onRemoveAllDone={handleRemoveAllDone}
             onManualCheckout={handleManualCheckout}
             onPrCheckout={handlePrCheckout}
