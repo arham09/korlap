@@ -35,6 +35,9 @@
     remove_script: "",
     pr_message: "",
     review_message: "",
+    spec_start_message: "",
+    implement_start_message: "",
+    advance_message: "",
     default_thinking: false,
     default_plan: false,
     caveman_ultra: false,
@@ -960,6 +963,73 @@
           <code>{"{{base_branch}}"}</code>
           <code>{"{{pr_number}}"}</code>
           <code>{"{{pr_title}}"}</code>
+        </div>
+      </div>
+
+      <div class="setting-block">
+        <div class="setting-meta">
+          <span class="setting-name">Start → Plan message (OpenSpec)</span>
+          <span class="setting-desc">Prompt sent when a task starts in the Plan phase with OpenSpec on. Leave empty to use the default. Keep the <code>/opsx:propose</code> line so OpenSpec runs.</span>
+        </div>
+        <textarea
+          class="pr-message-field"
+          bind:value={settings.spec_start_message}
+          oninput={scheduleAutosave}
+          placeholder={`/opsx:propose\n\nUse proposal name: {{slug}}\n\n{{prompt}}`}
+          rows="8"
+          spellcheck="false"
+        ></textarea>
+      </div>
+
+      <div class="env-hint">
+        <span class="env-hint-title">Available template variables</span>
+        <div class="env-vars">
+          <code>{"{{slug}}"}</code>
+          <code>{"{{prompt}}"}</code>
+        </div>
+      </div>
+
+      <div class="setting-block">
+        <div class="setting-meta">
+          <span class="setting-name">Start → In Progress message</span>
+          <span class="setting-desc">Prompt sent as the first message when a task starts directly in the In Progress phase. Leave empty to send the task text as-is.</span>
+        </div>
+        <textarea
+          class="pr-message-field"
+          bind:value={settings.implement_start_message}
+          oninput={scheduleAutosave}
+          placeholder={`{{prompt}}`}
+          rows="8"
+          spellcheck="false"
+        ></textarea>
+      </div>
+
+      <div class="env-hint">
+        <span class="env-hint-title">Available template variables</span>
+        <div class="env-vars">
+          <code>{"{{prompt}}"}</code>
+        </div>
+      </div>
+
+      <div class="setting-block">
+        <div class="setting-meta">
+          <span class="setting-name">Plan → In Progress message</span>
+          <span class="setting-desc">Prompt sent when advancing a task from Plan to In Progress. Leave empty to use the default. With OpenSpec on, keep the <code>/opsx:apply</code> line so the proposal is applied.</span>
+        </div>
+        <textarea
+          class="pr-message-field"
+          bind:value={settings.advance_message}
+          oninput={scheduleAutosave}
+          placeholder={`/opsx:apply\n\nApply proposal: {{slug}}\n\nProceed with implementation of the plan above.`}
+          rows="8"
+          spellcheck="false"
+        ></textarea>
+      </div>
+
+      <div class="env-hint">
+        <span class="env-hint-title">Available template variables</span>
+        <div class="env-vars">
+          <code>{"{{slug}}"}</code>
         </div>
       </div>
 
