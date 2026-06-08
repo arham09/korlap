@@ -1713,13 +1713,15 @@
     refreshChangeCounts(wsId);
     refreshPrStatus(wsId);
 
-    const baseText = "Proceed with implementation of the plan above.";
     const slug = slugifyTitle(originalTitle);
-    const promptText = repoSettings?.openspec_enabled
-      ? (slug
-          ? `/opsx:apply\n\nApply proposal: ${slug}\n\n${baseText}`
-          : `/opsx:apply\n\n${baseText}`)
-      : baseText;
+    const customAdvance = repoSettings?.advance_message?.trim();
+    const promptText = customAdvance
+      ? customAdvance.replace(/\{\{slug\}\}/g, slug)
+      : (repoSettings?.openspec_enabled
+          ? (slug
+              ? `/opsx:apply\n\nApply proposal: ${slug}\n\nProceed with implementation of the plan above.`
+              : `/opsx:apply\n\nProceed with implementation of the plan above.`)
+          : "Proceed with implementation of the plan above.");
     routeMessage(wsId, {
       id: crypto.randomUUID(),
       prompt: promptText,

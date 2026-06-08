@@ -195,6 +195,8 @@ pub fn send_message(
         ask_user_question_enabled,
         ws_phase,
         ws_task_title,
+        spec_start_msg,
+        implement_start_msg,
     ) = {
         let st = state.lock().map_err(|e| e.to_string())?;
         if st.agents.contains_key(&workspace_id) {
@@ -212,6 +214,8 @@ pub fn send_message(
         let mcp_servers = settings.mcp_servers.clone();
         let cv_ultra = settings.caveman_ultra;
         let os_enabled = settings.openspec_enabled;
+        let spec_start_msg = settings.spec_start_message.clone();
+        let implement_start_msg = settings.implement_start_message.clone();
         let aq_enabled = settings.ask_user_question_enabled;
         let prov = effective_provider(ws, settings);
         let ctx_dir = st.context_dir(&ws.repo_id);
@@ -235,6 +239,8 @@ pub fn send_message(
             aq_enabled,
             ws.phase,
             ws.task_title.clone(),
+            spec_start_msg,
+            implement_start_msg,
         )
     };
 
@@ -301,13 +307,31 @@ pub fn send_message(
     let cli_prompt = if openspec_enabled && ws_phase == WorkspacePhase::Spec {
         let slug_source = ws_task_title.as_deref().unwrap_or(&ws_branch);
         let slug = slugify_title(slug_source);
-        if slug.is_empty() {
+        if !spec_start_msg.is_empty() {
+            spec_start_msg
+                .replace("{{slug}}", &slug)
+                .replace("{{prompt}}", &prompt)
+        } else if slug.is_empty() {
             format!("/opsx:propose\n\n{}", prompt)
         } else {
             format!(
                 "/opsx:propose\n\nUse proposal name: {}\n\n{}",
                 slug, prompt
             )
+        }
+    } else if is_new_session
+        && ws_phase == WorkspacePhase::Implementing
+        && !implement_start_msg.is_empty()
+    {
+        // First message of a workspace started directly in the implementing
+        // phase (Start → In Progress). Resumed sessions (e.g. the Plan → In
+        // Progress advance, which keeps its session) have is_new_session=false
+        // and fall through, so they are never wrapped here.
+        let body = implement_start_msg.replace("{{prompt}}", &prompt);
+        if caveman_ultra {
+            format!("/caveman ultra\n\n{}", body)
+        } else {
+            body
         }
     } else if caveman_ultra {
         format!("/caveman ultra\n\n{}", prompt)

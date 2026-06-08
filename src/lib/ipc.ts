@@ -740,6 +740,9 @@ export interface RepoSettings {
   remove_script: string;
   pr_message: string;
   review_message: string;
+  spec_start_message: string;
+  implement_start_message: string;
+  advance_message: string;
   default_thinking: boolean;
   default_plan: boolean;
   caveman_ultra: boolean;

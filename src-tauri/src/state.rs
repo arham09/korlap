@@ -109,6 +109,21 @@ pub struct RepoSettings {
     pub pr_message: String,
     #[serde(default)]
     pub review_message: String,
+    /// Custom prompt for the Start → Plan transition (OpenSpec spec phase).
+    /// Empty falls back to the built-in `/opsx:propose` template. Supports
+    /// {{slug}} (proposal name) and {{prompt}} (task text) placeholders.
+    #[serde(default)]
+    pub spec_start_message: String,
+    /// Custom prompt for the first message of a workspace started directly in
+    /// the implementing phase (Start → In Progress). Empty falls back to sending
+    /// the raw task text. Supports the {{prompt}} placeholder.
+    #[serde(default)]
+    pub implement_start_message: String,
+    /// Custom prompt for the Plan → In Progress advance action. Empty falls back
+    /// to the built-in "Proceed with implementation…" template (wrapped with
+    /// `/opsx:apply` when OpenSpec is on). Supports the {{slug}} placeholder.
+    #[serde(default)]
+    pub advance_message: String,
     #[serde(default)]
     pub default_thinking: bool,
     #[serde(default)]
