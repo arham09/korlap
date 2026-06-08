@@ -40,6 +40,8 @@
     caveman_ultra: false,
     openspec_enabled: false,
     ask_user_question_enabled: false,
+    proposal_docs_enabled: false,
+    proposal_docs_glob: "",
     default_start_phase: "implementing",
     system_prompt: "",
     lsp_servers: {},
@@ -908,6 +910,38 @@
             </button>
           </label>
         </div>
+      </div>
+
+      <div class="setting-block">
+        <div class="setting-meta">
+          <span class="setting-name">Proposal docs</span>
+          <span class="setting-desc">Show a "Docs" tab in each workspace listing <strong>git-ignored</strong> files (e.g. implementation-proposal markdown) that match the glob below, rendered as formatted Markdown. Off by default.</span>
+        </div>
+        <div class="toggle-group">
+          <label class="toggle-row">
+            <span class="toggle-label">Enable Docs tab</span>
+            <button
+              class="toggle-switch"
+              class:on={settings.proposal_docs_enabled}
+              onclick={() => { settings.proposal_docs_enabled = !settings.proposal_docs_enabled; scheduleAutosave(); }}
+              role="switch"
+              aria-checked={settings.proposal_docs_enabled}
+            >
+              <span class="toggle-knob"></span>
+            </button>
+          </label>
+        </div>
+        {#if settings.proposal_docs_enabled}
+          <textarea
+            class="pr-message-field"
+            bind:value={settings.proposal_docs_glob}
+            oninput={scheduleAutosave}
+            placeholder={"docs/proposals/**/*.md\nIMPLEMENTATION.md"}
+            rows="3"
+            spellcheck="false"
+          ></textarea>
+          <p class="template-var-hint">One glob per line, relative to the worktree root (git <code>:(glob)</code> pathspec syntax — <code>**</code> matches across directories). Only ignored files are listed; tracked files already appear in the Diff tab.</p>
+        {/if}
       </div>
 
       <div class="setting-block">

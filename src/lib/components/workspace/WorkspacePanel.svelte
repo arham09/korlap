@@ -9,13 +9,14 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import ChatPanel from "$lib/components/chat/ChatPanel.svelte";
   import DiffViewer from "./DiffViewer.svelte";
+  import ProposalDocs from "./ProposalDocs.svelte";
   import FileBrowser from "./FileBrowser.svelte";
   import TerminalView from "./Terminal.svelte";
   import ReviewPill from "./ReviewPill.svelte";
   import ResizeHandle from "../ResizeHandle.svelte";
   import { draggable, resizable, tooltip, type DragOffset } from "$lib/actions";
 
-  export type PanelTab = "diff" | "files";
+  export type PanelTab = "diff" | "files" | "docs";
 
   interface Props {
     activeTab: PanelTab;
@@ -131,9 +132,19 @@
     onProviderSwitch,
   }: Props = $props();
 
-  let availableTabs = $derived(
-    isStaging ? ["files"] as const : ["diff", "files"] as const
-  );
+  let availableTabs = $derived.by<PanelTab[]>(() => {
+    if (isStaging) return ["files"];
+    const tabs: PanelTab[] = ["diff", "files"];
+    if (repoSettings?.proposal_docs_enabled) tabs.push("docs");
+    return tabs;
+  });
+
+  // If the Docs tab is open and the feature gets disabled, fall back to Diff.
+  $effect(() => {
+    if (activeTab === "docs" && !repoSettings?.proposal_docs_enabled) {
+      activeTab = "diff";
+    }
+  });
 
   let isBusy = $derived(selectedWs?.status === "running" || reviewRunning || operationInProgress);
 
@@ -653,6 +664,11 @@
             <div class="ws-tab-container active-layer" style:display={activeTab === "files" ? undefined : "none"}>
               <FileBrowser scope={{ type: "workspace", workspaceId: selectedWs.id }} navigateTo={fileNavigatePath} navigateToLine={fileNavigateLine} />
             </div>
+            {#if repoSettings?.proposal_docs_enabled}
+              <div class="ws-tab-container active-layer" style:display={activeTab === "docs" ? undefined : "none"}>
+                <ProposalDocs workspaceId={selectedWs.id} refreshTrigger={diffRefreshTrigger} />
+              </div>
+            {/if}
           {/if}
         </div>
       </div>

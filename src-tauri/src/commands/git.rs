@@ -251,6 +251,85 @@ pub async fn get_diff(
     }).await.map_err(|e| format!("Task failed: {}", e))?
 }
 
+// ── Proposal docs (ignored files surfaced in the Docs tab) ───────────
+
+#[derive(Clone, serde::Serialize)]
+pub struct ProposalDoc {
+    pub path: String,
+}
+
+/// List ignored files in the workspace worktree matching the repo's configured
+/// proposal-docs glob patterns. Returns an empty list when the feature is
+/// disabled or no glob is configured. Files are *ignored* by git (so they never
+/// appear in the diff), which is exactly why they need a separate surface.
+#[tauri::command]
+pub async fn list_proposal_docs(
+    workspace_id: String,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<Vec<ProposalDoc>, String> {
+    let (worktree_path, enabled, glob) = {
+        let st = state.lock().map_err(|e| e.to_string())?;
+        let ws = st
+            .workspaces
+            .get(&workspace_id)
+            .ok_or("Workspace not found")?;
+        let settings = st.repo_settings.get(&ws.repo_id).cloned().unwrap_or_default();
+        (
+            ws.worktree_path.clone(),
+            settings.proposal_docs_enabled,
+            settings.proposal_docs_glob.clone(),
+        )
+    };
+
+    // Each non-empty line is one `:(glob)` pathspec; patterns are OR'd by git.
+    let patterns: Vec<String> = glob
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .map(|l| format!(":(glob){}", l))
+        .collect();
+
+    if !enabled || patterns.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut args: Vec<String> = vec![
+            "ls-files".into(),
+            "--others".into(),
+            "--ignored".into(),
+            "--exclude-standard".into(),
+            "-z".into(),
+            "--".into(),
+        ];
+        args.extend(patterns);
+
+        let output = git_cmd()
+            .args(&args)
+            .current_dir(&worktree_path)
+            .output()
+            .map_err(|e| format!("Failed to list proposal docs: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("git ls-files failed: {}", stderr.trim()));
+        }
+
+        let mut docs: Vec<ProposalDoc> = output
+            .stdout
+            .split(|&b| b == 0)
+            .filter(|raw| !raw.is_empty())
+            .map(|raw| ProposalDoc {
+                path: String::from_utf8_lossy(raw).to_string(),
+            })
+            .collect();
+        docs.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(docs)
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
 // ── Direct git commands ──────────────────────────────────────────────
 
 #[derive(Clone, serde::Serialize)]

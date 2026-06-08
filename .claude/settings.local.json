@@ -13,7 +13,10 @@
       "Bash(openspec instructions *)",
       "Bash(grep -n 'design\\\\s*=\\\\|\\\\bdesign:\\\\|design:\\\\s*$derived\\\\|let design\\\\|const design\\\\|phase\\\\s*===\\\\|phase.*Design\\\\|isDesign\\\\|filterDesign' src/routes/+page.svelte)",
       "Bash(rtk ls *)",
-      "Bash(rtk grep *)"
+      "Bash(rtk grep *)",
+      "Bash(awk '/pub struct RepoSettings/,/^}/' src-tauri/src/state.rs)",
+      "Bash(rtk cargo *)",
+      "Bash(grep -E '\\\\.\\(svelte|ts\\)$')"
     ]
   }
 }
