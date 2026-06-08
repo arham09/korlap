@@ -138,6 +138,16 @@ pub struct RepoSettings {
     /// Defaults to false so existing repos see no behavior change on upgrade.
     #[serde(default)]
     pub ask_user_question_enabled: bool,
+    /// When true, a "Docs" tab is shown in the workspace panel listing ignored
+    /// files (e.g. implementation-proposal markdown) that match
+    /// `proposal_docs_glob`. Off by default so existing repos see no change.
+    #[serde(default)]
+    pub proposal_docs_enabled: bool,
+    /// Newline-separated glob patterns (git pathspec `:(glob)` syntax, relative
+    /// to the worktree root, e.g. `docs/proposals/**/*.md`) selecting which
+    /// ignored files surface in the Docs tab. Empty surfaces nothing.
+    #[serde(default)]
+    pub proposal_docs_glob: String,
     #[serde(default)]
     pub default_start_phase: WorkspacePhase,
     #[serde(default)]

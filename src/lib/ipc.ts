@@ -495,6 +495,20 @@ export async function getDiff(
   return invoke<string>("get_diff", { workspaceId, filePath });
 }
 
+export interface ProposalDoc {
+  path: string;
+}
+
+/**
+ * List ignored files in the workspace matching the repo's proposal-docs glob.
+ * Returns [] when the feature is disabled or no glob is configured.
+ */
+export async function listProposalDocs(
+  workspaceId: string,
+): Promise<ProposalDoc[]> {
+  return invoke<ProposalDoc[]>("list_proposal_docs", { workspaceId });
+}
+
 // ── Base Branch Updates ─────────────────────────────────────────────
 
 export interface BaseUpdateStatus {
@@ -748,6 +762,8 @@ export interface RepoSettings {
   caveman_ultra: boolean;
   openspec_enabled: boolean;
   ask_user_question_enabled: boolean;
+  proposal_docs_enabled: boolean;
+  proposal_docs_glob: string;
   default_start_phase: WorkspacePhase;
   system_prompt: string;
   lsp_servers: Record<string, LspServerConfig>;

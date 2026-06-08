@@ -126,6 +126,7 @@ pub fn run() {
             // git
             commands::git::get_changed_files,
             commands::git::get_diff,
+            commands::git::list_proposal_docs,
             commands::git::get_repo_head,
             commands::git::checkout_default_branch,
             commands::git::git_commit,
