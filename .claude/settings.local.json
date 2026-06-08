@@ -16,7 +16,11 @@
       "Bash(rtk grep *)",
       "Bash(awk '/pub struct RepoSettings/,/^}/' src-tauri/src/state.rs)",
       "Bash(rtk cargo *)",
-      "Bash(grep -E '\\\\.\\(svelte|ts\\)$')"
+      "Bash(grep -E '\\\\.\\(svelte|ts\\)$')",
+      "Bash(git rev-list *)",
+      "Bash(set -e)",
+      "Bash(git stash *)",
+      "Bash(python3 -m json.tool .claude/settings.local.json)"
     ]
   }
 }
