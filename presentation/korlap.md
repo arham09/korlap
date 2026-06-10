@@ -187,23 +187,15 @@ Running several Claude Code agents at once, the plain tooling fought me at every
 - Structured chat
 - Diff viewer
 - Terminal · Files · Editor
-- Script runner
 
 </div>
 <div>
 
-**Make them smart**
-- AI Review
-- LSP for agents
-- Built-in + custom MCP
-- Knowledge base
-
 **Automate & integrate**
-- Autopilot
-- Branch sync + conflict fixes
+- LSP for agents
+- Branch sync 
 - `gh` profiles per repo
-- Combo workspaces
-- Jira / PR / manual import
+- Isolated workspaces
 
 </div>
 </div>
@@ -236,7 +228,7 @@ Running several Claude Code agents at once, the plain tooling fought me at every
 The board **is** the lifecycle. Dragging a card advances the agent through:
 
 - **Todo** → defined, no agent yet.
-- **Plan** → the agent designs the change (plan mode, optional `openspec`).
+- **Plan** → the agent designs the change (plan mode, optional `plan`).
 - **In Progress** → full-permission implementation.
 - **Review** → a PR is open; keep iterating.
 - **Done** → merged; worktree kept for audit.
@@ -357,8 +349,7 @@ Keep long-running branches current without leaving the app.
 ### Per repo <span class="tag">⌘,</span>
 - `system_prompt`, default model
 - `default_start_phase`, `default_plan`
-- `openspec_enabled`, `caveman_ultra`
-- Themes (Amber / Indigo / Peach / Slate) + light/dark
+- `openspec_enabled`,
 
 </div>
 </div>

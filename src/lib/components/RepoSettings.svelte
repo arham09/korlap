@@ -853,7 +853,7 @@
             </button>
           </label>
           <label class="toggle-row">
-            <span class="toggle-label">Plan</span>
+            <span class="toggle-label" use:tooltip={{ text: "New conversations default to plan mode — the agent researches and proposes a plan without editing files. You can still toggle Plan per-conversation in chat. Off by default." }}>Plan mode</span>
             <button
               class="toggle-switch"
               class:on={settings.default_plan}
@@ -901,7 +901,7 @@
             </button>
           </label>
           <label class="toggle-row">
-            <span class="toggle-label" use:tooltip={{ text: "Start button creates a Plan workspace by default. Drag a todo directly to In Progress to skip planning." }}>Start in Plan phase</span>
+            <span class="toggle-label" use:tooltip={{ text: "Requires OpenSpec integration. When on, the Start button creates the workspace in the Plan column (Spec phase) instead of In Progress — it sets the kanban lane and prompt only, and no longer forces plan mode. Drag a todo straight to In Progress to skip it." }}>Start in Plan column</span>
             <button
               class="toggle-switch"
               class:on={settings.default_start_phase === "spec"}

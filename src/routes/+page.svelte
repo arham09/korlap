@@ -926,9 +926,6 @@
       hydratePrStatusFromCache(ws.map((w) => w.id), prStatusMap);
       ws.forEach((w) => loadPersistedMessages(w.id));
       ws.forEach((w) => {
-        if (w.phase === "spec") planModeByWorkspace.set(w.id, true);
-      });
-      ws.forEach((w) => {
         refreshChangeCounts(w.id);
         refreshPrStatus(w.id);
         // Load provider info per workspace (non-blocking)
@@ -1335,7 +1332,7 @@
         if (ws.id === creatingWsId) continue;
 
         // Plan-mode workspace finished planning — execute the plan
-        if (planModeByWorkspace.get(ws.id) === true) {
+        if ((planModeByWorkspace.get(ws.id) ?? repoSettings?.default_plan ?? false) === true) {
           addAutopilotEvent("auto_answer", `Executing plan for ${ws.name}`, ws.id, ws.name);
           planModeByWorkspace.set(ws.id, false);
           sendPrompt(ws.id, "Execute the plan above. Do not ask for confirmation — just do it.", "Executing plan");
@@ -1535,7 +1532,7 @@
           reviewStatus: reviewByWorkspace.get(w.id)?.status ?? null,
           reviewCycles: autoReviewCount.get(w.id) ?? 0,
           changes: changeCounts.get(w.id) ?? null,
-          planMode: planModeByWorkspace.get(w.id) ?? false,
+          planMode: planModeByWorkspace.get(w.id) ?? repoSettings?.default_plan ?? false,
         })),
         prStatuses: [...prStatusMap.entries()].map(([id, pr]) => ({
           wsId: id, state: pr.state, mergeable: pr.mergeable, checks: pr.checks,
@@ -1600,7 +1597,7 @@
     // Optimistically remove the todo card immediately on start
     handleRemoveTodo(todoId);
 
-    const usePlanMode = phase === "spec" || (todo.planMode ?? false);
+    const usePlanMode = todo.planMode ?? repoSettings?.default_plan ?? false;
 
     try {
       const ws = await createWorkspace(repoId, todo.title, todo.description || undefined, todoId, undefined, phase);
