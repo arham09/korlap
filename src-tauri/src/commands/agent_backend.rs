@@ -404,6 +404,10 @@ impl AgentBackend for ClaudeBackend {
                 label: "Default (Opus)".into(),
             },
             ModelOption {
+                value: "fable".into(),
+                label: "Fable".into(),
+            },
+            ModelOption {
                 value: "opus".into(),
                 label: "Opus".into(),
             },

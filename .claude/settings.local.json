@@ -20,7 +20,18 @@
       "Bash(git rev-list *)",
       "Bash(set -e)",
       "Bash(git stash *)",
-      "Bash(python3 -m json.tool .claude/settings.local.json)"
+      "Bash(python3 -m json.tool .claude/settings.local.json)",
+      "Bash(file *.png *.jpg *.jpeg *.PNG *.JPG)",
+      "Bash(sed 's/^marp: false/marp: true/' korlap.md)",
+      "Bash(bunx @marp-team/marp-cli@latest .preview.md --html -o korlap-preview.html --allow-local-files)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(bunx @marp-team/marp-cli@latest .preview.md --images png --allow-local-files)",
+      "Bash(rtk du *)",
+      "Bash(grep -rnB2 -A1 'shortcut: \"⌘1\"\\\\|shortcut: \"⌘2\"\\\\|shortcut: \"⌘P\"\\\\|shortcut: \"⌘M\"' src --include='*.svelte')",
+      "Bash(bunx -y @marp-team/marp-cli@latest korlap.md --images png -o /tmp/korlap-slide.png)",
+      "Bash(grep -nc '^---$' korlap.md)",
+      "Skill(claude-api)",
+      "Bash(grep -iA2 \"model\")"
     ]
   }
 }
