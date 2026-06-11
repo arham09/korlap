@@ -191,7 +191,7 @@ pub fn send_message(
         session_id,
         source_pr,
         caveman_ultra,
-        openspec_enabled,
+        plan_phase_enabled,
         ask_user_question_enabled,
         ws_phase,
         ws_task_title,
@@ -213,7 +213,7 @@ pub fn send_message(
         let user_sp = settings.system_prompt.clone();
         let mcp_servers = settings.mcp_servers.clone();
         let cv_ultra = settings.caveman_ultra;
-        let os_enabled = settings.openspec_enabled;
+        let os_enabled = settings.plan_phase_enabled;
         let spec_start_msg = settings.spec_start_message.clone();
         let implement_start_msg = settings.implement_start_message.clone();
         let aq_enabled = settings.ask_user_question_enabled;
@@ -304,7 +304,7 @@ pub fn send_message(
     };
 
     let images_dir = data_dir.join("images");
-    let cli_prompt = if openspec_enabled && ws_phase == WorkspacePhase::Spec {
+    let cli_prompt = if plan_phase_enabled && ws_phase == WorkspacePhase::Spec {
         let slug_source = ws_task_title.as_deref().unwrap_or(&ws_branch);
         let slug = slugify_title(slug_source);
         if !spec_start_msg.is_empty() {

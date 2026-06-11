@@ -41,11 +41,10 @@
     default_thinking: false,
     default_plan: false,
     caveman_ultra: false,
-    openspec_enabled: false,
+    plan_phase_enabled: false,
     ask_user_question_enabled: false,
     proposal_docs_enabled: false,
     proposal_docs_glob: "",
-    default_start_phase: "implementing",
     system_prompt: "",
     lsp_servers: {},
     mcp_servers: {},
@@ -877,13 +876,13 @@
             </button>
           </label>
           <label class="toggle-row">
-            <span class="toggle-label">OpenSpec integration</span>
+            <span class="toggle-label" use:tooltip={{ text: "When on, new tasks start in the Plan column: the agent drafts an OpenSpec proposal with /opsx:propose first, which you review before advancing to In Progress. Off by default — tasks start directly in In Progress." }}>Plan phase</span>
             <button
               class="toggle-switch"
-              class:on={settings.openspec_enabled}
-              onclick={() => { settings.openspec_enabled = !settings.openspec_enabled; scheduleAutosave(); }}
+              class:on={settings.plan_phase_enabled}
+              onclick={() => { settings.plan_phase_enabled = !settings.plan_phase_enabled; scheduleAutosave(); }}
               role="switch"
-              aria-checked={settings.openspec_enabled}
+              aria-checked={settings.plan_phase_enabled}
             >
               <span class="toggle-knob"></span>
             </button>
@@ -896,18 +895,6 @@
               onclick={() => { settings.ask_user_question_enabled = !settings.ask_user_question_enabled; scheduleAutosave(); }}
               role="switch"
               aria-checked={settings.ask_user_question_enabled}
-            >
-              <span class="toggle-knob"></span>
-            </button>
-          </label>
-          <label class="toggle-row">
-            <span class="toggle-label" use:tooltip={{ text: "Requires OpenSpec integration. When on, the Start button creates the workspace in the Plan column (Spec phase) instead of In Progress — it sets the kanban lane and prompt only, and no longer forces plan mode. Drag a todo straight to In Progress to skip it." }}>Start in Plan column</span>
-            <button
-              class="toggle-switch"
-              class:on={settings.default_start_phase === "spec"}
-              onclick={() => { settings.default_start_phase = settings.default_start_phase === "spec" ? "implementing" : "spec"; scheduleAutosave(); }}
-              role="switch"
-              aria-checked={settings.default_start_phase === "spec"}
             >
               <span class="toggle-knob"></span>
             </button>

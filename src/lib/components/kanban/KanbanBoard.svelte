@@ -73,7 +73,7 @@
     onAutopilotCommand?: (command: string) => void;
     active?: boolean;
     /** When false, the Plan column is hidden unless legacy spec-phase workspaces still exist. */
-    openspecEnabled?: boolean;
+    planPhaseEnabled?: boolean;
   }
 
   let {
@@ -118,13 +118,13 @@
     autopilotRebuildingStaging = false,
     onAutopilotCommand,
     active = false,
-    openspecEnabled = false,
+    planPhaseEnabled = false,
   }: Props = $props();
 
-  // Plan column visible when OpenSpec is on, OR when there are legacy spec
-  // workspaces left over from a previous OpenSpec-on state. Drag rules and
+  // Plan column visible when Plan phase is on, OR when there are legacy spec
+  // workspaces left over from a previous Plan-phase-on state. Drag rules and
   // column rendering both respect this.
-  const planColumnVisible = $derived(openspecEnabled || design.length > 0);
+  const planColumnVisible = $derived(planPhaseEnabled || design.length > 0);
 
   let showAddDialog = $state(false);
   let showManualCheckout = $state(false);

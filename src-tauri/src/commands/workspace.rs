@@ -254,12 +254,12 @@ pub async fn create_workspace(
     };
 
     // Check if there's a setup script to run
-    let (setup_script, openspec_enabled) = {
+    let (setup_script, plan_phase_enabled) = {
         let st = state.lock().map_err(|e| e.to_string())?;
         let s = st.repo_settings.get(&repo_id);
         (
             s.map(|s| s.setup_script.clone()).unwrap_or_default(),
-            s.map(|s| s.openspec_enabled).unwrap_or_default(),
+            s.map(|s| s.plan_phase_enabled).unwrap_or_default(),
         )
     };
 
@@ -286,7 +286,7 @@ pub async fn create_workspace(
 
     // Initialize OpenSpec in the worktree if enabled and not already present.
     // Non-fatal: a failure here only logs a warning.
-    if openspec_enabled && ws.phase == WorkspacePhase::Spec && !worktree_path.join("openspec").exists() {
+    if plan_phase_enabled && ws.phase == WorkspacePhase::Spec && !worktree_path.join("openspec").exists() {
         tracing::info!("Running openspec init for workspace {}", ws.name);
         let mut init_cmd = std::process::Command::new("openspec");
         init_cmd.arg("init").current_dir(&worktree_path);
@@ -1116,16 +1116,16 @@ pub fn advance_to_implementation(
         )
     };
 
-    let openspec_enabled = {
+    let plan_phase_enabled = {
         let st = state.lock().map_err(|e| e.to_string())?;
         st.repo_settings
             .get(&repo_id)
-            .map(|s| s.openspec_enabled)
+            .map(|s| s.plan_phase_enabled)
             .unwrap_or_default()
     };
 
     // 2) If conditions are right, create the impl branch and switch the worktree.
-    let new_branch: Option<String> = if openspec_enabled && current_phase == WorkspacePhase::Spec {
+    let new_branch: Option<String> = if plan_phase_enabled && current_phase == WorkspacePhase::Spec {
         let base = impl_branch_from(&current_branch);
         let mut chosen: Option<String> = None;
         for attempt in 0..10 {

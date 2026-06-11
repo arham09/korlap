@@ -130,8 +130,8 @@ pub struct RepoSettings {
     pub default_plan: bool,
     #[serde(default)]
     pub caveman_ultra: bool,
-    #[serde(default)]
-    pub openspec_enabled: bool,
+    #[serde(default, alias = "openspec_enabled")]
+    pub plan_phase_enabled: bool,
     /// When true, the agent gets access to mcp__korlap__ask_user_question and is
     /// nudged to use it instead of the native AskUserQuestion (which is blocked
     /// either way because `claude -p` headless mode can't wait for a user).
@@ -148,8 +148,6 @@ pub struct RepoSettings {
     /// ignored files surface in the Docs tab. Empty surfaces nothing.
     #[serde(default)]
     pub proposal_docs_glob: String,
-    #[serde(default)]
-    pub default_start_phase: WorkspacePhase,
     #[serde(default)]
     pub system_prompt: String,
     /// User-configured LSP servers. Merged with built-in defaults at runtime.

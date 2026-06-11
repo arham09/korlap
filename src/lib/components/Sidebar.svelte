@@ -18,10 +18,10 @@
     rebuildingStaging?: boolean;
     stagingMergedCount?: number;
     /** When false, the Plan group is hidden unless it has at least one workspace. */
-    openspecEnabled?: boolean;
+    planPhaseEnabled?: boolean;
   }
 
-  let { workspaces, selectedWsId, creatingWsId = null, prStatusMap, reviewingWsIds = new Set(), onSelect, onRename, onRemove, stagingWsId = null, stagingError = null, rebuildingStaging = false, stagingMergedCount = 0, openspecEnabled = false }: Props =
+  let { workspaces, selectedWsId, creatingWsId = null, prStatusMap, reviewingWsIds = new Set(), onSelect, onRename, onRemove, stagingWsId = null, stagingError = null, rebuildingStaging = false, stagingMergedCount = 0, planPhaseEnabled = false }: Props =
     $props();
 
   let menuOpenId = $state<string | null>(null);
@@ -71,9 +71,9 @@
     }
 
     const all: { key: GroupKey; label: string; items: WorkspaceInfo[] }[] = [];
-    // Hide the Plan group entirely when OpenSpec is off AND no legacy spec
+    // Hide the Plan group entirely when Plan phase is off AND no legacy spec
     // workspaces remain, matching the kanban Plan column visibility.
-    if (openspecEnabled || plan.length > 0) {
+    if (planPhaseEnabled || plan.length > 0) {
       all.push({ key: "plan" as GroupKey, label: "Plan", items: plan });
     }
     all.push({ key: "active" as GroupKey, label: "In Progress", items: active });

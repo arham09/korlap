@@ -760,11 +760,10 @@ export interface RepoSettings {
   default_thinking: boolean;
   default_plan: boolean;
   caveman_ultra: boolean;
-  openspec_enabled: boolean;
+  plan_phase_enabled: boolean;
   ask_user_question_enabled: boolean;
   proposal_docs_enabled: boolean;
   proposal_docs_glob: string;
-  default_start_phase: WorkspacePhase;
   system_prompt: string;
   lsp_servers: Record<string, LspServerConfig>;
   mcp_servers: Record<string, McpServerConfig>;

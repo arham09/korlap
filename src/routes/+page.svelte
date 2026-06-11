@@ -1173,12 +1173,11 @@
     }
   }
 
-  // Default start phase honoring the OpenSpec gate: if OpenSpec is off, force
-  // "implementing" even when the repo setting says "spec" — keeps the workflow
-  // consistent with the hidden Plan column.
+  // Default start phase derived from the Plan phase toggle: when on, new tasks
+  // start in the Plan column (spec phase); otherwise they go straight to
+  // In Progress.
   function effectiveStartPhase(): "spec" | "implementing" {
-    if (!repoSettings?.openspec_enabled) return "implementing";
-    return repoSettings?.default_start_phase ?? "implementing";
+    return repoSettings?.plan_phase_enabled ? "spec" : "implementing";
   }
 
   async function handleNewTodoAndStart(data: { title: string; description: string; newImages: PastedImage[]; existingPaths: string[]; mentions?: Mention[]; planMode?: boolean; thinkingMode?: boolean; model?: string; provider?: AgentProvider }) {
@@ -1714,7 +1713,7 @@
     const customAdvance = repoSettings?.advance_message?.trim();
     const promptText = customAdvance
       ? customAdvance.replace(/\{\{slug\}\}/g, slug)
-      : (repoSettings?.openspec_enabled
+      : (repoSettings?.plan_phase_enabled
           ? (slug
               ? `/opsx:apply\n\nApply proposal: ${slug}\n\nProceed with implementation of the plan above.`
               : `/opsx:apply\n\nProceed with implementation of the plan above.`)
@@ -2870,7 +2869,7 @@
             {stagingError}
             {rebuildingStaging}
             stagingMergedCount={stagingMergedBranches.length}
-            openspecEnabled={!!repoSettings?.openspec_enabled}
+            planPhaseEnabled={!!repoSettings?.plan_phase_enabled}
           />
 
           <WorkspacePanel
@@ -2974,7 +2973,7 @@
             defaultThinkingMode={repoSettings?.default_thinking ?? false}
             defaultPlanMode={repoSettings?.default_plan ?? false}
             active={appMode === "plan" && planView === "kanban"}
-            openspecEnabled={!!repoSettings?.openspec_enabled}
+            planPhaseEnabled={!!repoSettings?.plan_phase_enabled}
             onCardClick={handleKanbanCardClick}
             onSpawnAgent={(id) => handleSpawnFromTodo(id, "implementing")}
             onSpawnDesign={(id) => handleSpawnFromTodo(id, "spec")}
